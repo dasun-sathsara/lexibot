@@ -8,6 +8,7 @@ status message is posted and later edited in place with the batch summary.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import structlog
 from aiogram import Bot, Router
@@ -16,7 +17,7 @@ from arq.connections import ArqRedis
 from arq.jobs import Job
 
 from lexibot.bot.keyboards import completed_keyboard
-from lexibot.bot.rendering import render_card_preview, safe_markdown
+from lexibot.bot.rendering import render_card_preview, render_summary, safe_markdown
 from lexibot.core.enums import ItemOutcome
 from lexibot.core.parsing import parse_message
 from lexibot.worker.enqueue import (
@@ -37,7 +38,7 @@ _background_tasks: set[asyncio.Task[None]] = set()
 async def _monitor_jobs(
     status: Message,
     jobs: list[Job],
-    word_keys: list[tuple[str, str]],
+    word_keys: list[str],
     arq: ArqRedis,
     bot: Bot,
 ) -> None:
@@ -57,13 +58,20 @@ async def _monitor_jobs(
             except Exception:
                 pass
 
-        states = {}
-        for word, key in word_keys:
+        progress_map: dict[str, str] = {}
+        for job in jobs:
             try:
-                val = await arq.get(key)
-                states[word] = val.decode() if isinstance(val, bytes) else (val or "queue")
+                val = await arq.get(f"lexibot:progress:{job.job_id}")
+                if val:
+                    data = json.loads(val.decode() if isinstance(val, bytes) else val)
+                    progress_map.update(data)
             except Exception:
-                states[word] = "queue"
+                pass
+
+        states = {}
+        for word in word_keys:
+            target = word.strip().casefold()
+            states[word] = progress_map.get(target, "queue")
 
         def format_state(state: str) -> str:
             STATE_TEXT = {
@@ -85,7 +93,7 @@ async def _monitor_jobs(
         plural = "s" if words_count > 1 else ""
         header = f"⏳ **Processing {words_count} word{plural}...**"
         msg_parts = [header, ""]
-        for word, _ in word_keys:
+        for word in word_keys:
             state = states[word]
             formatted = format_state(state)
             msg_parts.append(f"* `{word}` — {formatted}")
@@ -119,7 +127,7 @@ async def _monitor_jobs(
         except Exception as e:
             log.error("job.result.failed", error=str(e))
 
-    for word, _ in word_keys:
+    for word in word_keys:
         matched = False
         for r in results:
             r_hw = r.get("headword", "").strip().casefold()
@@ -142,8 +150,22 @@ async def _monitor_jobs(
     except Exception as e:
         log.error("batch_results.save.failed", error=str(e))
 
-    preview_text = safe_markdown(render_card_preview(results))
-    kb = completed_keyboard(results)
+    is_batch = len(word_keys) > 1
+    if is_batch:
+        summary_items = []
+        for r in results:
+            w = r.get("word") or r.get("headword") or "unknown"
+            raw_outcome = r.get("outcome", "skipped")
+            try:
+                outcome = ItemOutcome(raw_outcome)
+            except ValueError:
+                outcome = ItemOutcome.SKIPPED
+            summary_items.append((w, outcome))
+        preview_text = safe_markdown(render_summary(summary_items))
+        kb = None
+    else:
+        preview_text = safe_markdown(render_card_preview(results))
+        kb = completed_keyboard(results)
 
     try:
         await bot.edit_message_text(
@@ -177,9 +199,13 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
     status = await message.answer(f"\u23f3 Queued {len(kept)} word(s)\u2026{note}")
 
     jobs: list[Job] = []
-    word_keys: list[tuple[str, str]] = []
+    word_keys: list[str] = []
     for chunk in chunk_items(kept, size=DEFAULT_CHUNK_SIZE):
         jid = job_id(user.id, "+".join(i.headword for i in chunk))
+
+        initial_progress = {item.headword.strip().casefold(): "queue" for item in chunk}
+        await arq.set(f"lexibot:progress:{jid}", json.dumps(initial_progress), ex=3600)
+
         job = await arq.enqueue_job(
             "process_chunk",
             [item.model_dump() for item in chunk],
@@ -191,12 +217,7 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
         jobs.append(job)
 
         for item in chunk:
-            word_keys.append((item.headword, f"progress:{jid}:{item.headword}"))
-
-    for _, key in word_keys:
-        existing = await arq.get(key)
-        if not existing:
-            await arq.set(key, "queue", ex=3600)
+            word_keys.append(item.headword)
 
     task = asyncio.create_task(_monitor_jobs(status, jobs, word_keys, arq, bot))
     _background_tasks.add(task)

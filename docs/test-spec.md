@@ -223,7 +223,19 @@ def test_ssml_07_unknown_gender():
  | CONF-03 | missing required secret              | Settings raises validation error at startup (fail fast) |
  | SEC-01  | log an object containing a SecretStr | rendered as `**********`, never the raw value           |
  | SEC-02  | exception repr includes settings     | secret values not leaked in tracebacks                  |
-## 10. Shared fixtures (`tests/conftest.py`)
+## 10. Telegram UX & Callbacks — `src/lexibot/bot/rendering.py`, `src/lexibot/bot/keyboards.py`, `src/lexibot/bot/handlers/callbacks.py`
+ 
+ **Implemented in:** `tests/unit/test_ux_callbacks.py` (all tests UX-01 to UX-05).
+ 
+ | ID    | Scenario                     | Expected                                                                       |
+ | ----- | ---------------------------- | ------------------------------------------------------------------------------ |
+ | UX-01 | render card preview single   | outputs rich card details (part of speech, definition, and examples)           |
+ | UX-02 | render card preview multiple | outputs rich card details for all completed words in the batch                 |
+ | UX-03 | completed keyboard single    | inline keyboard contains Edit, Regen, and Delete buttons for one word          |
+ | UX-04 | completed keyboard multiple  | inline keyboard contains separate buttons for all words in the batch           |
+ | UX-05 | edit reply helper validation | returns parsed dict with word field and state key only if valid reply in Redis |
+
+## 11. Shared fixtures (`tests/conftest.py`)
  
  The following fixtures are **implemented** in `tests/conftest.py`:
  - `clock` — monkeypatched `time.monotonic` for key-pool timing tests (`KEY-*`).
@@ -231,7 +243,8 @@ def test_ssml_07_unknown_gender():
  - `sample_card` / `make_card` — test card factories.
  - `make_items` — generates raw item fixtures.
  - `sleep_spy` — spy to record `asyncio.sleep` durations without actual waiting.
-## 11. Priority order for the coder
+
+## 12. Priority order for the coder
 
 1. `PARSE-*` (correctness of everything downstream depends on it)
 2. `KEY-*` (resilience under rate limits)
