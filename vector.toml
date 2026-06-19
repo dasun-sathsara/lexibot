@@ -3,6 +3,7 @@ type = "docker_logs"
 
 [sinks.axiom]
 type = "http"
+inputs = ["docker_logs"]
 uri = "https://eu-central-1.aws.edge.axiom.co/v1/ingest/lexibot"
 encoding.codec = "json"
 headers.Authorization = "${AXIOM_BEARER_TOKEN}"
