@@ -181,137 +181,49 @@ def test_ssml_07_unknown_gender():
         build_ssml("x", gender="robot", slow=False)
 ```
 
-## 6. Anki upsert & query building — `src/lexibot/anki/upsert.py`, `src/lexibot/anki/connect.py`
+## 6. Anki query building — `src/lexibot/anki/connect.py`
  
  **Implemented in:** `tests/unit/test_anki_query.py` (pure-logic tests: UPSERT-04 quote escaping and query escaping, UPSERT-06/07 media filename stability and cache-busting, UPSERT-08 collection-wide query).
  
- **Out of scope:** UPSERT-01, UPSERT-02, UPSERT-03, and UPSERT-05 (which mock the AnkiConnect client decision path).
+ Fake client operations (like actually sending requests to AnkiConnect) require mocking and are out of scope. The implemented tests verify the query-escaping and media-naming logic.
  
- Fake the `AnkiConnect` client (Protocol) and assert decision + escaping.
-
-| ID        | Scenario                                       | Expected                                                                               |
-| --------- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
-| UPSERT-01 | findNotes returns []                           | calls addNote with allowDuplicate=true; outcome ADDED                                  |
-| UPSERT-02 | findNotes returns [123]                        | calls updateNoteFields(123, ...); no addNote; outcome REWRITTEN                        |
-| UPSERT-03 | findNotes returns [123, 456] (dupes exist)     | updates only first (123); outcome REWRITTEN                                            |
-| UPSERT-04 | word field contains a double quote             | findNotes query escapes the quote; no query-injection                                  |
-| UPSERT-05 | rewrite path                                   | old media for that word replaced (storeMediaFile called with same 3 filenames)         |
-| UPSERT-06 | add path media naming                          | filenames `tgb_<headword>_<hash>.mp3`, `_ex1`, `_ex2`; hash stable for same text+voice |
-| UPSERT-07 | media hash differs when voice gender changes   | different filename (cache busts on voice change)                                       |
-| UPSERT-08 | query targets whole collection, not just Daily | findNotes query has no `deck:Daily` constraint on the match                            |
-
-```python
-import pytest
-from lexibot.core.enums import ItemOutcome
-
-@pytest.mark.asyncio
-async def test_upsert_02_existing_note_rewritten(fake_connect, sample_card):
-    fake_connect.find_notes.return_value = [123]
-    outcome = await make_gateway(fake_connect).upsert(sample_card)
-    assert outcome is ItemOutcome.REWRITTEN
-    fake_connect.update_note_fields.assert_awaited_once()
-    fake_connect.add_note.assert_not_awaited()
-
-@pytest.mark.asyncio
-async def test_upsert_04_escapes_quote_in_query(fake_connect):
-    card = make_card(word_field='n:say "hi"')
-    fake_connect.find_notes.return_value = []
-    await make_gateway(fake_connect).upsert(card)
-    query = fake_connect.find_notes.call_args.args[0]
-    assert r'\"' in query  # quote escaped inside the search term
-```
-
-## 7. Structured concurrency & partial failure — `src/lexibot/core/pipeline.py`
- 
- **Out of scope:** All tests (PIPE-01 to PIPE-06) require mocking the pipeline/TTS/LLM and are out of scope for the current pure-logic suite.
-
-| ID      | Scenario                           | Expected                                                                                                     |
-| ------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| PIPE-01 | all 3 TTS clips succeed            | Card has 3 media; outcome ADDED/REWRITTEN                                                                    |
-| PIPE-02 | one clip raises TTSError           | TaskGroup raises ExceptionGroup; pipeline catches, flags audio-retry, card still created with available text |
-| PIPE-03 | all 3 clips raise                  | ExceptionGroup of 3; mapped to a single user-facing failure for that item                                    |
-| PIPE-04 | TTS semaphore = 4                  | never more than 4 concurrent synthesize calls (assert max observed concurrency)                              |
-| PIPE-05 | LLM chunk semaphore = min(#keys,3) | concurrency capped accordingly                                                                               |
-| PIPE-06 | sibling cancellation               | when one clip fails fast, siblings are cancelled (no orphaned tasks)                                         |
-
-```python
-@pytest.mark.asyncio
-async def test_pipe_04_tts_concurrency_capped():
-    gate = ConcurrencyProbe(limit_expected=4)
-    tts = ProbingSynthesizer(gate)
-    await run_pipeline(items=make_items(20), tts=tts)
-    assert gate.max_observed <= 4
-```
-
-## 8. Retry / backoff / 429 handling — `src/lexibot/anki/connect.py`, `src/lexibot/llm/gemini.py` (with `tenacity`)
- 
- **Out of scope:** All tests (RETRY-01 to RETRY-06) require HTTP-level mocking (`respx`) or mock clients and are out of scope for the current pure-logic suite.
-
-| ID       | Scenario                                   | Expected                                                                                            |
-| -------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| RETRY-01 | Gemini returns 429 once then 200           | offending key penalized; call retried; succeeds; result returned                                    |
-| RETRY-02 | Gemini 429 on every key                    | retries exhausted → LLMError; item marked failed, batch continues                                   |
-| RETRY-03 | transient 503 from AnkiConnect             | retried with backoff; eventually succeeds                                                           |
-| RETRY-04 | AnkiConnect connection refused (Anki down) | raises AnkiUnavailable → item re-queued with backoff, user told "saved, will add when Anki is back" |
-| RETRY-05 | backoff is bounded                         | retry count and max delay capped (no infinite retry); assert attempts == configured max             |
-| RETRY-06 | non-retryable 400 from Azure               | not retried; surfaces TTSError immediately                                                          |
-
-Use `respx` to script status-code sequences; assert `pool.penalize` called with the right key on 429.
-
-## 9. Idempotency — `src/lexibot/worker/enqueue.py`, `src/lexibot/worker/tasks.py`
+ | ID        | Scenario                                       | Expected                                                                               |
+ | --------- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+ | UPSERT-04 | word field contains a double quote             | findNotes query escapes the quote; no query-injection                                  |
+ | UPSERT-06 | add path media naming                          | filenames `tgb_<headword>_<hash>.mp3`, `_ex1`, `_ex2`; hash stable for same text+voice |
+ | UPSERT-07 | media hash differs when voice gender changes   | different filename (cache busts on voice change)                                       |
+ | UPSERT-08 | query targets whole collection, not just Daily | findNotes query has no `deck:Daily` constraint on the match                            |
+## 7. Idempotency — `src/lexibot/worker/enqueue.py`
  
  **Implemented in:** `tests/unit/test_enqueue.py` (pure-logic tests: IDEM-01, IDEM-02, IDEM-05).
  
- **Out of scope:** IDEM-03 and IDEM-04 (which require a live ARQ/Redis + Anki).
-
-| ID      | Scenario                                     | Expected                                                                |
-| ------- | -------------------------------------------- | ----------------------------------------------------------------------- |
-| IDEM-01 | job id determinism                           | same (user, pos, headword) → identical job id string                    |
-| IDEM-02 | different user, same word                    | different job id (user-scoped)                                          |
-| IDEM-03 | same word enqueued twice while first pending | second enqueue coalesced (one job runs)                                 |
-| IDEM-04 | duplicate job actually runs (race)           | upsert backstop → still one card (REWRITTEN second time, not a 2nd ADD) |
-| IDEM-05 | headword normalization in job id             | `Run` and `run` map to the same id (case-folded, trimmed)               |
-
-## 10. Outcome classification & batch summary — `src/lexibot/bot/rendering.py`
+ | ID      | Scenario                         | Expected                                                 |
+ | ------- | -------------------------------- | -------------------------------------------------------- |
+ | IDEM-01 | job id determinism               | same (user, pos, headword) → identical job id string     |
+ | IDEM-02 | different user, same word        | different job id (user-scoped)                           |
+ | IDEM-05 | headword normalization in job id | `Run` and `run` map to the same id (case-folded, trimmed) |
+## 8. Outcome classification & batch summary — `src/lexibot/bot/rendering.py`
  
  **Implemented in:** `tests/unit/test_rendering.py` (all tests SUM-01 to SUM-04).
-
-| ID     | Scenario                            | Expected                                                     |
-| ------ | ----------------------------------- | ------------------------------------------------------------ |
-| SUM-01 | mix of added/rewritten/skipped      | counts correct; checklist lists each item under right bucket |
-| SUM-02 | all skipped (invalid words)         | summary says 0 added, lists skipped with reason              |
-| SUM-03 | summary fits Telegram length limits | long batches truncated/paged, never exceed 4096 chars        |
-| SUM-04 | markdown-special chars in a word    | escaped via telegramify-markdown (no broken formatting)      |
-
-## 11. Invalid-word handling & LLM schema — `src/lexibot/llm/schema.py`, `src/lexibot/core/pipeline.py`
  
- **Out of scope:** All tests (VALID-01 to VALID-05) require LLM mock or pipeline mock integrations and are out of scope for the current pure-logic suite.
-
-| ID       | Scenario                                 | Expected                                                                     |
-| -------- | ---------------------------------------- | ---------------------------------------------------------------------------- |
-| VALID-01 | `is_valid_word == False`                 | outcome SKIPPED; no TTS, no Anki write; batch continues                      |
-| VALID-02 | LLM returns malformed JSON               | schema validation error → per-item fallback retry, then SKIPPED if still bad |
-| VALID-03 | chunk call returns fewer items than sent | missing items fall back to per-item calls (no silent drop)                   |
-| VALID-04 | sense_hint provided                      | prompt includes the hint; targeted sense honored in output mapping           |
-| VALID-05 | POS outside enum                         | validation error → item flagged, not crash                                   |
-
-## 12. Auth, config & secret hygiene — `src/lexibot/config.py`, `src/lexibot/logging.py`, `src/lexibot/bot/middlewares/auth.py`
+ | ID     | Scenario                            | Expected                                                     |
+ | ------ | ----------------------------------- | ------------------------------------------------------------ |
+ | SUM-01 | mix of added/rewritten/skipped      | counts correct; checklist lists each item under right bucket |
+ | SUM-02 | all skipped (invalid words)         | summary says 0 added, lists skipped with reason              |
+ | SUM-03 | summary fits Telegram length limits | long batches truncated/paged, never exceed 4096 chars        |
+ | SUM-04 | markdown-special chars in a word    | escaped via telegramify-markdown (no broken formatting)      |
+## 9. Auth, config & secret hygiene — `src/lexibot/config.py`, `src/lexibot/logging.py`
  
  **Implemented in:** `tests/unit/test_config.py` (CONF-01 to CONF-03, SEC-01 to SEC-02).
  
- **Out of scope:** AUTH-01 and AUTH-02 (whitelist middleware authorization behavior, which require Telegram/update mocking).
-
-| ID      | Scenario                             | Expected                                                |
-| ------- | ------------------------------------ | ------------------------------------------------------- |
-| AUTH-01 | sender id in ALLOWED_IDS             | handler runs                                            |
-| AUTH-02 | sender id not in ALLOWED_IDS         | update dropped silently; no handler, no reply           |
-| CONF-01 | `VB_GEMINI_API_KEYS="k1,k2,k3"`      | parsed to 3-element list                                |
-| CONF-02 | `VB_ALLOWED_IDS="111,222"`           | parsed to [111, 222] (ints)                             |
-| CONF-03 | missing required secret              | Settings raises validation error at startup (fail fast) |
-| SEC-01  | log an object containing a SecretStr | rendered as `**********`, never the raw value           |
-| SEC-02  | exception repr includes settings     | secret values not leaked in tracebacks                  |
-
-## 13. Shared fixtures (`tests/conftest.py`)
+ | ID      | Scenario                             | Expected                                                |
+ | ------- | ------------------------------------ | ------------------------------------------------------- |
+ | CONF-01 | `VB_GEMINI_API_KEYS="k1,k2,k3"`      | parsed to 3-element list                                |
+ | CONF-02 | `VB_ALLOWED_IDS="111,222"`           | parsed to [111, 222] (ints)                             |
+ | CONF-03 | missing required secret              | Settings raises validation error at startup (fail fast) |
+ | SEC-01  | log an object containing a SecretStr | rendered as `**********`, never the raw value           |
+ | SEC-02  | exception repr includes settings     | secret values not leaked in tracebacks                  |
+## 10. Shared fixtures (`tests/conftest.py`)
  
  The following fixtures are **implemented** in `tests/conftest.py`:
  - `clock` — monkeypatched `time.monotonic` for key-pool timing tests (`KEY-*`).
@@ -319,17 +231,10 @@ Use `respx` to script status-code sequences; assert `pool.penalize` called with 
  - `sample_card` / `make_card` — test card factories.
  - `make_items` — generates raw item fixtures.
  - `sleep_spy` — spy to record `asyncio.sleep` durations without actual waiting.
- 
- The following dependency-mocking fixtures are **out of scope** (omitted in `tests/conftest.py`):
- - `fake_connect` — `AsyncMock` implementing the AnkiConnect client.
- - `fake_tts` / `ProbingSynthesizer` — mock TTS client.
- - `fake_llm` — mock LLM client.
- - `respx_mock` — for Gemini/Azure/AnkiConnect HTTP-level tests.
-## 14. Priority order for the coder
+## 11. Priority order for the coder
 
 1. `PARSE-*` (correctness of everything downstream depends on it)
-2. `UPSERT-*` (data-integrity / no duplicate cards)
-3. `KEY-*` + `RETRY-*` (resilience under rate limits)
-4. `SSML-05/06` (silent Azure 400s)
-5. `PIPE-*` (partial-failure robustness)
-6. `IDEM-*`, then the rest.
+2. `KEY-*` (resilience under rate limits)
+3. `SSML-05/06` (silent Azure 400s)
+4. `IDEM-*` (idempotency keys)
+5. `CONF-*`, `SEC-*`, `SUM-*` (config validation and rendering)
