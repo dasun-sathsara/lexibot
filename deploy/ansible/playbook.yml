@@ -1,0 +1,63 @@
+---
+- name: Provision vocab-bot host
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/vocab-bot
+    repo_url: https://github.com/appledore-labs/vocab-bot.git
+
+  tasks:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - git
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker Engine + Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker is running and enabled
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Clone the repository
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+
+    - name: Lock down .env permissions if present
+      ansible.builtin.file:
+        path: "{{ app_dir }}/.env"
+        mode: "0600"
+      ignore_errors: true
+
+    - name: Install nightly backup cron
+      ansible.builtin.cron:
+        name: vocab-bot collection snapshot
+        minute: "30"
+        hour: "3"
+        job: "{{ app_dir }}/deploy/backup/snapshot.sh >> /var/log/vocab-backup.log 2>&1"

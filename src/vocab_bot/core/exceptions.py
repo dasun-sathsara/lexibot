@@ -1,4 +1,4 @@
-"""Typed error hierarchy (architecture §10).
+"""Typed error hierarchy.
 
 Handlers ``match`` on these types to produce friendly, actionable user-facing copy.
 """

@@ -1,4 +1,4 @@
-"""Data access for idempotency, user settings, and audit (architecture §9)."""
+"""Data access for idempotency, user settings, and audit."""
 
 from __future__ import annotations
 

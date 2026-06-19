@@ -1,4 +1,4 @@
-"""Preview callback handlers: Add / Regenerate / Fix sense / Discard (plan §11, §12)."""
+"""Preview callback handlers: Add / Regenerate / Fix sense / Discard."""
 
 from __future__ import annotations
 

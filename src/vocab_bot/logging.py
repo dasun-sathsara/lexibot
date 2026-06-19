@@ -1,4 +1,4 @@
-"""structlog configuration with secret scrubbing (architecture §11, §14).
+"""structlog configuration with secret scrubbing.
 
 A processor walks the event dict and renders any :class:`~pydantic.SecretStr` (or known
 secret-ish values) as a fixed mask so credentials never reach the logs (SEC-01/02).

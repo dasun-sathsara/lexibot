@@ -1,4 +1,4 @@
-"""ARQ worker settings (architecture §4, §10).
+"""ARQ worker settings.
 
 Builds the shared adapter graph once at worker startup (``on_startup``) and stores it on the
 ARQ context so tasks can reach the pipeline/LLM. Job retries + bounded backoff give the

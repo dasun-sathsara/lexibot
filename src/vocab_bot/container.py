@@ -1,4 +1,4 @@
-"""Composition root (architecture §2, §7).
+"""Composition root.
 
 Builds the concrete adapters and injects them. Nothing else in the codebase constructs an
 SDK client directly; swapping an adapter is a change here only.

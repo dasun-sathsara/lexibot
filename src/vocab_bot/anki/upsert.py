@@ -1,4 +1,4 @@
-"""Anki upsert gateway: find -> update | add (architecture §7.3, test-spec §1.3).
+"""Anki upsert gateway: find -> update | add.
 
 Match is collection-wide by exact ``Word`` field. On a hit we rewrite the first matching
 note in place and replace its media; otherwise we add a new note with ``allowDuplicate``.
@@ -19,7 +19,7 @@ BOT_TAG = "tgbot"
 
 
 def date_tag(now: datetime, tz: str) -> str:
-    """The ``added::YYYY-MM-DD`` tag in the configured local day (plan §6)."""
+    """The ``added::YYYY-MM-DD`` tag in the configured local day."""
     local = now.astimezone(ZoneInfo(tz))
     return f"added::{local:%Y-%m-%d}"
 

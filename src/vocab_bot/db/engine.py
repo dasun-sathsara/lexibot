@@ -1,4 +1,4 @@
-"""Async engine + session factory (architecture §9)."""
+"""Async engine + session factory."""
 
 from __future__ import annotations
 

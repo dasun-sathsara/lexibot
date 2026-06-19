@@ -1,4 +1,4 @@
-"""SQLModel tables (architecture §9)."""
+"""SQLModel tables."""
 
 from __future__ import annotations
 

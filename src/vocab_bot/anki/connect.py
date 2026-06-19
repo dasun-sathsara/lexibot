@@ -1,4 +1,4 @@
-"""AnkiConnect client over httpx (architecture §7).
+"""AnkiConnect client over httpx.
 
 AnkiConnect exposes a single JSON-RPC endpoint; every action is a POST of
 ``{"action", "version", "params"}`` and the reply is ``{"result", "error"}``.

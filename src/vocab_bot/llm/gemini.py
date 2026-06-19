@@ -1,4 +1,4 @@
-"""Gemini language-model adapter (architecture §7, plan §7).
+"""Gemini language-model adapter.
 
 Uses the unified Google Gen AI SDK (``google-genai``) with Pydantic structured output. A
 key is drawn from the :class:`GeminiKeyPool` per call; on an HTTP 429 the key is penalized

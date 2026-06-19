@@ -1,4 +1,4 @@
-"""PARSE-01 .. PARSE-14 — message parsing contract (test-spec §2)."""
+"""PARSE-01 .. PARSE-14 — message parsing contract."""
 
 from __future__ import annotations
 

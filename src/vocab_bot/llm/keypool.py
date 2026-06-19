@@ -1,4 +1,4 @@
-"""Gemini API-key pool (architecture §7.1, test-spec §4).
+"""Gemini API-key pool.
 
 Round-robin selection with per-key cooldown. On an HTTP 429 the offending key is
 penalized and skipped until its cooldown expires; concurrency scales with the number of

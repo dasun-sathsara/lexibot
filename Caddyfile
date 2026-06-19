@@ -1,0 +1,15 @@
+# Automatic TLS via Let's Encrypt (architecture §3, plan §4a).
+# Set DOMAIN in .env (Caddy reads it from the environment).
+
+{$DOMAIN} {
+	encode gzip
+
+	# Telegram webhook -> bot service (internal network only).
+	reverse_proxy /webhook bot:8080
+
+	# Health endpoint for uptime checks.
+	reverse_proxy /healthz bot:8080
+
+	# Everything else is rejected.
+	respond 404
+}

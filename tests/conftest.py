@@ -1,4 +1,4 @@
-"""Shared fixtures (test-spec §13).
+"""Shared fixtures.
 
 Only fixtures used by the pure-logic suite are wired live; the dependency-mocking fixtures
 (fake_connect / fake_tts / fake_llm / respx_mock) are intentionally omitted because those

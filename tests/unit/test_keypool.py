@@ -1,4 +1,4 @@
-"""KEY-01 .. KEY-07 — Gemini key pool (test-spec §4).
+"""KEY-01 .. KEY-07 — Gemini key pool.
 
 Timing is controlled by the ``clock`` fixture (monkeypatched ``time.monotonic``) and a
 patched ``asyncio.sleep`` that advances the fake clock instead of really waiting.

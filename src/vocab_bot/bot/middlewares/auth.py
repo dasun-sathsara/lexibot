@@ -1,4 +1,4 @@
-"""Whitelist middleware (architecture §4, §14; plan §8).
+"""Whitelist middleware.
 
 Drops any update whose sender id is not in ``ALLOWED_IDS`` before any handler runs
 (AUTH-01/02). The drop is silent: no reply, no handler invocation.

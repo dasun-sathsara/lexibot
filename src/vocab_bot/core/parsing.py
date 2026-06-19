@@ -1,4 +1,4 @@
-"""Message parsing: inbound text -> candidate items (test-spec §1.1, §2).
+"""Message parsing: inbound text -> candidate items.
 
 Light pre-splitting only. We never try to decide whether an item is a bare word or a
 ``word + sense`` beyond locating an explicit sense delimiter; deeper intent (typo

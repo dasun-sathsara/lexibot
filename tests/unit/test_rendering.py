@@ -1,4 +1,4 @@
-"""SUM-01..04 — outcome classification + batch summary (test-spec §10).
+"""SUM-01..04 — outcome classification + batch summary.
 
 These are pure-logic (no aiogram Bot needed): they exercise the counting and rendering
 functions directly.

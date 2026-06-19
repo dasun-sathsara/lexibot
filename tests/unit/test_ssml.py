@@ -1,4 +1,4 @@
-"""SSML-01 .. SSML-07 — SSML builder (test-spec §5).
+"""SSML-01 .. SSML-07 — SSML builder.
 
 SSML-05/06 are regression-drivers: the architecture sketch omits XML escaping, so a word
 like ``rock & roll`` or text with a quote would produce invalid SSML and a 400 from Azure.

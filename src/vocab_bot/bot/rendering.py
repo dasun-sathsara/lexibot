@@ -1,4 +1,4 @@
-"""Telegram rendering: batch summaries + safe markdown (architecture §4, plan §11).
+"""Telegram rendering: batch summaries + safe markdown.
 
 Outcome classification (added / rewritten / skipped) is pure logic and unit-testable;
 ``markdownify`` from telegramify-markdown escapes user text so a word with markdown-special

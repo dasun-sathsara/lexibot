@@ -1,4 +1,4 @@
-"""Prompt construction for the enrichment call (plan §7, §9)."""
+"""Prompt construction for the enrichment call."""
 
 from __future__ import annotations
 

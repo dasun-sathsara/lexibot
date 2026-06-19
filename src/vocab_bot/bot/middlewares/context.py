@@ -1,4 +1,4 @@
-"""Request-scoped structlog context binding (architecture §11)."""
+"""Request-scoped structlog context binding."""
 
 from __future__ import annotations
 

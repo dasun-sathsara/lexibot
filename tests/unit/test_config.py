@@ -1,4 +1,4 @@
-"""CONF-01/02/03 and SEC-01/02 — config parsing + secret hygiene (test-spec §12)."""
+"""CONF-01/02/03 and SEC-01/02 — config parsing + secret hygiene."""
 
 from __future__ import annotations
 

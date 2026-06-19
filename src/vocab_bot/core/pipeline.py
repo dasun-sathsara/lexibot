@@ -1,10 +1,10 @@
-"""Per-word orchestration: LLM -> TTS -> Anki (architecture §4, §8; test-spec §7).
+"""Per-word orchestration: LLM -> TTS -> Anki.
 
 The three audio clips are generated with :class:`asyncio.TaskGroup` so a failure cancels its
 siblings and raises an :class:`ExceptionGroup`. The pipeline maps that to graceful partial
 failure: the card is still written (text only) and audio is flagged for later retry
 (PIPE-02/03). Concurrency is bounded by two semaphores — ``min(#keys, 3)`` for LLM chunks and
-4 for TTS calls (architecture §8).
+4 for TTS calls.
 """
 
 from __future__ import annotations

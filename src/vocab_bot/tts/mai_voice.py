@@ -1,4 +1,4 @@
-"""MAI-Voice-2 synthesizer over the Azure Speech SDK (architecture §7, plan §7).
+"""MAI-Voice-2 synthesizer over the Azure Speech SDK.
 
 The Azure SDK is synchronous, so each synthesis runs in a worker thread via
 ``asyncio.to_thread`` to keep the event loop free. Input is SSML (built by

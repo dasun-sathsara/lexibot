@@ -1,4 +1,4 @@
-"""Gemini structured-output schema (architecture §6/§7, plan §7).
+"""Gemini structured-output schema.
 
 A single call returns an array of these objects (one per word in the chunk). The response
 model mirrors :class:`vocab_bot.core.models.Sense` but is kept separate so the wire schema can

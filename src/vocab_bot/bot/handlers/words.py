@@ -1,4 +1,4 @@
-"""Free-text word ingestion (architecture §4, plan §5, §11).
+"""Free-text word ingestion.
 
 Parses the message, applies the soft cap and dedup, chunks the items, and enqueues one
 ``process_chunk`` job per chunk with a deterministic id so rapid resends coalesce. A single

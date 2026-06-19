@@ -1,4 +1,4 @@
-"""Typed, validated, secret-aware settings (architecture §5).
+"""Typed, validated, secret-aware settings.
 
 All env vars are prefixed ``VB_``; secrets are :class:`~pydantic.SecretStr`; list-valued
 vars parse from comma-separated strings.

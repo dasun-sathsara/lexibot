@@ -1,4 +1,4 @@
-"""ARQ worker tasks: chunk enrichment -> per-word pipeline (architecture §4, §8).
+"""ARQ worker tasks: chunk enrichment -> per-word pipeline.
 
 ``process_chunk`` runs one structured LLM call for a chunk, then fans out per-word work
 through the :class:`~vocab_bot.core.pipeline.Pipeline`. Validation failures fall back to

@@ -1,4 +1,4 @@
-"""Admin alerting on repeated failures (architecture §11)."""
+"""Admin alerting on repeated failures."""
 
 from __future__ import annotations
 

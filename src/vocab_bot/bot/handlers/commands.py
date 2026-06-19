@@ -1,4 +1,4 @@
-"""Command handlers: /start, /model, /help (architecture §2)."""
+"""Command handlers: /start, /model, /help."""
 
 from __future__ import annotations
 

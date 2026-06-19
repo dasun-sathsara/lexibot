@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vocab_bot.core.enums import PartOfSpeech
 
-# Anki note-type field names (plan §6, note type "Eng Vocab 2 Examples").
+# Anki note-type field names.
 FIELD_WORD = "Word"
 FIELD_WORD_PRON = "Word Pronunciation"
 FIELD_EN_MEANING = "English Meaning"
@@ -23,7 +23,7 @@ FIELD_SENTENCE_2 = "Example Sentence 2"
 FIELD_SENTENCE_PRON_2 = "Example Sentence Pronunciation 2"
 FIELD_SI_MEANING = "Sinhala Meaning"
 
-# Media filename namespace, kept distinct from his existing ``nn_`` media (plan §6).
+# Media filename namespace, kept distinct from his existing ``nn_`` media.
 MEDIA_PREFIX = "tgb"
 _HASH_LEN = 8
 
@@ -149,7 +149,7 @@ class Card(BaseModel):
 
     @property
     def fields(self) -> dict[str, str]:
-        """The AnkiConnect ``fields`` mapping (plan §6).
+        """The AnkiConnect ``fields`` mapping.
 
         Pronunciation fields carry the ``[sound:...]`` tag for whichever clips exist; when a
         clip is missing its field is left empty so audio can be backfilled on retry.

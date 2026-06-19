@@ -1,4 +1,4 @@
-"""aiogram Dispatcher assembly + router registration (architecture §2)."""
+"""aiogram Dispatcher assembly + router registration."""
 
 from __future__ import annotations
 

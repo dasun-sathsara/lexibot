@@ -1,4 +1,4 @@
-"""CHUNK-01..05 and IDEM-01/02/05 — chunking + job-id determinism (test-spec §3, §9).
+"""CHUNK-01..05 and IDEM-01/02/05 — chunking + job-id determinism.
 
 Only the pure-logic cases are covered here. IDEM-03 (coalescing while pending) and IDEM-04
 (duplicate job race -> upsert backstop) require a live ARQ/Redis + Anki and are out of scope.

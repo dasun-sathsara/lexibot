@@ -1,4 +1,4 @@
-"""FastAPI app: Telegram webhook route + lifespan wiring (architecture §2, §4)."""
+"""FastAPI app: Telegram webhook route + lifespan wiring."""
 
 from __future__ import annotations
 

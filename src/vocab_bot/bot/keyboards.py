@@ -1,4 +1,4 @@
-"""Inline keyboards for the single-word preview (plan §11)."""
+"""Inline keyboards for the single-word preview."""
 
 from __future__ import annotations
 

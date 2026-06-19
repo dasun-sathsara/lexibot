@@ -1,4 +1,4 @@
-"""Media storage for a card's audio clips (architecture §7).
+"""Media storage for a card's audio clips.
 
 Filenames are produced by :func:`vocab_bot.core.models.media_filename` (the ``tgb_`` namespace
 with a text+voice hash). On both the add and rewrite paths we store the same three
