@@ -2,8 +2,9 @@
 type = "docker_logs"
 
 [sinks.axiom]
-type = "axiom"
+type = "http"
 inputs = ["docker_logs"]
-token = "${AXIOM_TOKEN}"
-dataset = "lexibot"
-url = "https://api.eu.axiom.co"
+uri = "https://api.eu.axiom.co/v1/datasets/lexibot/ingest"
+encoding.codec = "json"
+headers.Authorization = "Bearer ${AXIOM_TOKEN}"
+headers.Content-Type = "application/json"
