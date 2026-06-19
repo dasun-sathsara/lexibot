@@ -59,6 +59,8 @@ services:
     # AnkiConnect (8765) is reachable only on the internal network, never published.
     expose:
       - "8765"
+    ports:
+      - "6080:3001"
     networks:
       - vocabnet
 

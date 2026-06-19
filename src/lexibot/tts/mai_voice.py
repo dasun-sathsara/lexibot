@@ -23,7 +23,10 @@ class MaiVoiceSynthesizer:
 
     def __init__(self, *, speech_key: str, endpoint: str, gender: str = "female") -> None:
         self._gender = gender
-        self._config = speechsdk.SpeechConfig(subscription=speech_key, endpoint=endpoint)
+        if endpoint.startswith(("http://", "https://")):
+            self._config = speechsdk.SpeechConfig(subscription=speech_key, endpoint=endpoint)
+        else:
+            self._config = speechsdk.SpeechConfig(subscription=speech_key, region=endpoint)
         self._config.set_speech_synthesis_output_format(_OUTPUT_FORMAT)
 
     async def synthesize(self, text: str, *, slow: bool = False) -> bytes:
