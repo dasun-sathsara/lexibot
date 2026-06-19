@@ -44,4 +44,4 @@ USER app
 EXPOSE 8080
 
 # Default: the webhook app. The worker overrides this in docker-compose.
-CMD ["python", "-m", "vocab_bot"]
+CMD ["python", "-m", "lexibot"]

@@ -1,4 +1,4 @@
-# vocab-bot
+# lexibot
 
 Telegram → Anki vocabulary bot. Send English words; receive Anki cards with Sinhala +
 English meanings, two example sentences, and MAI-Voice-2 TTS audio — upserted into a
@@ -12,22 +12,22 @@ brew install uv          # macOS — or see https://docs.astral.sh/uv/
 
 # 2. Clone + install
 git clone <repo>
-cd vocab-bot
+cd lexibot
 uv sync
 
 # 3. Configure
 cp .env.example .env     # fill in all VB_* values
 
 # 4. Run the bot (webhook mode requires a public URL; use polling for local testing)
-uv run python -m vocab_bot
+uv run python -m lexibot
 
 # 5. Run the ARQ worker in a separate terminal
-uv run arq vocab_bot.worker.settings.WorkerSettings
+uv run arq lexibot.worker.settings.WorkerSettings
 ```
 
 ## Environment variables
 
-All variables are prefixed `VB_`. See `.env.example` for the full list with descriptions.
+Most application variables are prefixed `VB_`. See `.env.example` for the full list with descriptions.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -45,6 +45,7 @@ All variables are prefixed `VB_`. See `.env.example` for the full list with desc
 | `VB_ADMIN_ID` | | — | Telegram user ID to receive failure alerts |
 | `VB_TZ` | | `Asia/Colombo` | Timezone for `added::` date tags |
 | `VB_LOG_LEVEL` | | `INFO` | Log level |
+| `SYNC_USER1` | | `anki:password` | Credentials for self-hosted Anki sync server |
 
 ## Running the test suite
 
@@ -102,7 +103,7 @@ Nightly volume snapshots (Anki collection + sync data, 7 daily + 4 weekly):
 
 ```bash
 # Add to crontab on the VPS
-0 3 * * * /opt/vocab-bot/deploy/backup/snapshot.sh
+0 3 * * * /opt/lexibot/deploy/backup/snapshot.sh
 ```
 
 ## CI/CD

@@ -1,5 +1,5 @@
 [project]
-name = "vocab-bot"
+name = "lexibot"
 version = "0.1.0"
 description = "Telegram -> Anki vocabulary bot (Sinhala + English meanings, MAI-Voice-2 TTS, AnkiConnect upsert)."
 readme = "README.md"
@@ -25,14 +25,14 @@ dependencies = [
 ]
 
 [project.scripts]
-vocab-bot = "vocab_bot.__main__:main"
+lexibot = "lexibot.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/vocab_bot"]
+packages = ["src/lexibot"]
 
 [dependency-groups]
 dev = [

@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from vocab_bot.tts.ssml import build_ssml
+from lexibot.tts.ssml import build_ssml
 
 
 def test_ssml_01_slow_rate() -> None:

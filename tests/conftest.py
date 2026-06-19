@@ -11,15 +11,15 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
-from vocab_bot.core.enums import PartOfSpeech
-from vocab_bot.core.models import Card, RawItem, Sense
+from lexibot.core.enums import PartOfSpeech
+from lexibot.core.models import Card, RawItem, Sense
 
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, float]:
     """Monkeypatched ``time.monotonic`` for the key-pool timing tests (KEY-*)."""
     t = {"now": 1000.0}
-    monkeypatch.setattr("vocab_bot.llm.keypool.time.monotonic", lambda: t["now"])
+    monkeypatch.setattr("lexibot.llm.keypool.time.monotonic", lambda: t["now"])
     return t
 
 

@@ -3,9 +3,9 @@
 # Retains 7 daily + 4 weekly snapshots. Run from the repo root on the VPS.
 set -euo pipefail
 
-BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/vocab-bot}"
-SYNC_VOLUME="${SYNC_VOLUME:-vocab-bot_anki-sync-data}"
-PROFILE_VOLUME="${PROFILE_VOLUME:-vocab-bot_anki-profile}"
+BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/lexibot}"
+SYNC_VOLUME="${SYNC_VOLUME:-lexibot_anki-sync-data}"
+PROFILE_VOLUME="${PROFILE_VOLUME:-lexibot_anki-profile}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 DOW="$(date +%u)" # 1..7, 7 = Sunday
 

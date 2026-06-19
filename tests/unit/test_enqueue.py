@@ -6,8 +6,8 @@ Only the pure-logic cases are covered here. IDEM-03 (coalescing while pending) a
 
 from __future__ import annotations
 
-from vocab_bot.core.models import RawItem
-from vocab_bot.worker.enqueue import (
+from lexibot.core.models import RawItem
+from lexibot.worker.enqueue import (
     DEFAULT_CHUNK_SIZE,
     SOFT_CAP,
     apply_soft_cap,

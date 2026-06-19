@@ -6,13 +6,13 @@ functions directly.
 
 from __future__ import annotations
 
-from vocab_bot.bot.rendering import (
+from lexibot.bot.rendering import (
     TELEGRAM_MAX_LEN,
     render_summary,
     safe_markdown,
     summarize_counts,
 )
-from vocab_bot.core.enums import ItemOutcome
+from lexibot.core.enums import ItemOutcome
 
 
 def test_sum_01_counts_and_buckets() -> None:

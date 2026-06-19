@@ -7,8 +7,8 @@ cases (UPSERT-01/02/03/05) require mocking the AnkiConnect client and are out of
 
 from __future__ import annotations
 
-from vocab_bot.anki.connect import build_find_query, escape_query_term
-from vocab_bot.core.models import media_filename
+from lexibot.anki.connect import build_find_query, escape_query_term
+from lexibot.core.models import media_filename
 
 
 def test_upsert_04_escapes_double_quote_in_term() -> None:

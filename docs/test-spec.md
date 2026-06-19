@@ -68,7 +68,7 @@ Skeleton:
 
 ```python
 import pytest
-from vocab_bot.core.parsing import parse_message
+from lexibot.core.parsing import parse_message
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
@@ -117,12 +117,12 @@ Skeleton:
 ```python
 import asyncio
 import pytest
-from vocab_bot.llm.keypool import GeminiKeyPool
+from lexibot.llm.keypool import GeminiKeyPool
 
 @pytest.fixture
 def clock(monkeypatch):
     t = {"now": 1000.0}
-    monkeypatch.setattr("vocab_bot.llm.keypool.time.monotonic", lambda: t["now"])
+    monkeypatch.setattr("lexibot.llm.keypool.time.monotonic", lambda: t["now"])
     return t
 
 @pytest.mark.asyncio
@@ -160,7 +160,7 @@ SSML-05/06 are the important ones: a word like `rock & roll` or a sentence with 
 ```python
 import xml.etree.ElementTree as ET
 import pytest
-from vocab_bot.tts.ssml import build_ssml
+from lexibot.tts.ssml import build_ssml
 
 def test_ssml_05_escapes_special_chars():
     out = build_ssml('rock & "roll" <x>', gender="female", slow=False)
@@ -189,7 +189,7 @@ Fake the `AnkiConnect` client (Protocol) and assert decision + escaping.
 
 ```python
 import pytest
-from vocab_bot.core.enums import ItemOutcome
+from lexibot.core.enums import ItemOutcome
 
 @pytest.mark.asyncio
 async def test_upsert_02_existing_note_rewritten(fake_connect, sample_card):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from vocab_bot.core.parsing import parse_message
+from lexibot.core.parsing import parse_message
 
 
 def _pairs(raw: str) -> list[tuple[str, str | None]]:

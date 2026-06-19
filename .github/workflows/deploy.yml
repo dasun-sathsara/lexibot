@@ -55,7 +55,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/vocab-bot
+            cd ~/lexibot
             docker compose pull
             docker compose up -d
             docker image prune -f --filter "until=168h"

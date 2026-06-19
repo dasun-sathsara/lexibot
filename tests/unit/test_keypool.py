@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 import pytest
 
-from vocab_bot.llm.keypool import GeminiKeyPool
+from lexibot.llm.keypool import GeminiKeyPool
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def advancing_sleep(monkeypatch: pytest.MonkeyPatch, clock: dict[str, float]) ->
     async def _sleep(delay: float, *args: object, **kwargs: object) -> None:
         clock["now"] += delay
 
-    monkeypatch.setattr("vocab_bot.llm.keypool.asyncio.sleep", _sleep)
+    monkeypatch.setattr("lexibot.llm.keypool.asyncio.sleep", _sleep)
     return lambda: None
 
 

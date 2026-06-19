@@ -19,10 +19,10 @@ Companion to the Preliminary Plan. This document is the **technical architecture
 
 ## 2. Repository structure
 
-A `src/` layout with one installable package (`vocab_bot`), split by **bounded context** rather than by technical layer — each integration (LLM, TTS, Anki) is an isolated adapter behind a Protocol.
+A `src/` layout with one installable package (`lexibot`), split by **bounded context** rather than by technical layer — each integration (LLM, TTS, Anki) is an isolated adapter behind a Protocol.
 
 ```
-vocab-bot/
+lexibot/
 ├── pyproject.toml            # PEP 621 metadata + ruff/mypy/pytest config
 ├── uv.lock
 ├── .env.example
@@ -36,9 +36,9 @@ vocab-bot/
 ├── deploy/
 │   ├── ansible/              # one-shot VPS provisioning
 │   └── backup/snapshot.sh    # nightly + pre-deploy collection snapshots
-├── src/vocab_bot/
+├── src/lexibot/
 │   ├── __init__.py
-│   ├── __main__.py           # `python -m vocab_bot` → launches webhook app
+│   ├── __main__.py           # `python -m lexibot` → launches webhook app
 │   ├── config.py             # pydantic-settings Settings + get_settings()
 │   ├── logging.py            # structlog + Datadog formatting
 │   ├── app.py                # FastAPI app, webhook route, lifespan wiring
@@ -349,7 +349,7 @@ class ProcessedItem(SQLModel, table=True):
 
 ```toml
 [project]
-name = "vocab-bot"
+name = "lexibot"
 requires-python = ">=3.12"
 
 [tool.ruff]
@@ -367,7 +367,7 @@ plugins = ["pydantic.mypy"]
 asyncio_mode = "auto"
 ```
 
-- **Dockerfile** — multi-stage: `uv sync --frozen` into a venv, copy into a slim `python:3.12-slim` runtime; non-root user; `python -m vocab_bot`.
+- **Dockerfile** — multi-stage: `uv sync --frozen` into a venv, copy into a slim `python:3.12-slim` runtime; non-root user; `python -m lexibot`.
 - **`ci.yml`** — `ruff check`, `ruff format --check`, `mypy`, `pytest` on every PR/push.
 - **`deploy.yml`** — on push to `main` build + push images to GHCR; on a `vX.Y.Z` tag, SSH to the VPS and `docker compose pull && up -d`. Last ~5 image tags retained for rollback.
 

@@ -2,7 +2,7 @@
 # Services: bot, worker, redis, anki-headless, anki-sync-server, caddy.
 
 x-vocab-image: &vocab-image
-  image: ${VOCAB_IMAGE:-ghcr.io/appledore-labs/vocab-bot:latest}
+  image: ${VOCAB_IMAGE:-ghcr.io/appledore-labs/lexibot:latest}
   build:
     context: .
     dockerfile: Dockerfile
@@ -12,7 +12,7 @@ x-vocab-image: &vocab-image
 services:
   bot:
     <<: *vocab-image
-    command: ["python", "-m", "vocab_bot"]
+    command: ["python", "-m", "lexibot"]
     depends_on:
       redis:
         condition: service_healthy
@@ -25,7 +25,7 @@ services:
 
   worker:
     <<: *vocab-image
-    command: ["arq", "vocab_bot.worker.settings.WorkerSettings"]
+    command: ["arq", "lexibot.worker.settings.WorkerSettings"]
     depends_on:
       redis:
         condition: service_healthy
@@ -50,7 +50,7 @@ services:
 
   anki-headless:
     # Browser desktop + AnkiConnect pre-installed (plan §12).
-    image: ${ANKI_HEADLESS_IMAGE:-mlcivilengineer/anki-desktop-docker:latest}
+    image: ${ANKI_HEADLESS_IMAGE:-mlcivilengineer/anki-desktop-docker:main}
     restart: unless-stopped
     environment:
       - SYNC_SERVER=http://anki-sync-server:8080
@@ -76,6 +76,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    env_file: .env
     depends_on:
       - bot
     ports:

@@ -1,10 +1,10 @@
 ---
-- name: Provision vocab-bot host
+- name: Provision lexibot host
   hosts: all
   become: true
   vars:
-    app_dir: /opt/vocab-bot
-    repo_url: https://github.com/appledore-labs/vocab-bot.git
+    app_dir: /opt/lexibot
+    repo_url: https://github.com/dasun-sathsara/lexibot.git
 
   tasks:
     - name: Install prerequisites
@@ -47,7 +47,7 @@
       ansible.builtin.git:
         repo: "{{ repo_url }}"
         dest: "{{ app_dir }}"
-        version: main
+        version: master
 
     - name: Lock down .env permissions if present
       ansible.builtin.file:
@@ -57,7 +57,7 @@
 
     - name: Install nightly backup cron
       ansible.builtin.cron:
-        name: vocab-bot collection snapshot
+        name: lexibot collection snapshot
         minute: "30"
         hour: "3"
         job: "{{ app_dir }}/deploy/backup/snapshot.sh >> /var/log/vocab-backup.log 2>&1"

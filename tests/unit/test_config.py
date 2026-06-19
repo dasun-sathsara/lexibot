@@ -8,8 +8,8 @@ import pytest
 import structlog
 from pydantic import SecretStr, ValidationError
 
-from vocab_bot.config import Settings
-from vocab_bot.logging import MASK, scrub_secrets
+from lexibot.config import Settings
+from lexibot.logging import MASK, scrub_secrets
 
 _BASE_ENV = {
     "VB_TELEGRAM_TOKEN": "zztelegramsecretzz",
@@ -82,7 +82,7 @@ def test_sec_02_secret_not_leaked_in_repr(clean_env: pytest.MonkeyPatch) -> None
 
 
 def test_sec_01_end_to_end_through_structlog(capsys: pytest.CaptureFixture[str]) -> None:
-    from vocab_bot.logging import configure_logging
+    from lexibot.logging import configure_logging
 
     configure_logging("INFO")
     log = structlog.get_logger("test")
