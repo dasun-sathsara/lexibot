@@ -231,7 +231,7 @@ A relentless, branch-by-branch review resolved every remaining dependency. Summa
 - **Telegram transport:** **webhook** (a domain is available → Caddy issues TLS).
 - **Headless Anki image:** `mlcivilengineer/anki-desktop-docker` (browser desktop + AnkiConnect) for an easy one-time login.
 - **No startup checks:** assume `Daily` and `Eng Vocab 2 Examples` already exist; `addNote` surfaces an error if not.
-- **CI/CD:** build + push image on push to `main`; **deploy on a version tag** (`vX.Y.Z`); keep the last ~5 GHCR images for rollback.
+- **CI/CD:** build + push image on push to `master`; **deploy on a version tag** (`vX.Y.Z`); keep the last ~5 GHCR images for rollback.
 - **Secrets:** `.env` with locked file permissions on the VPS.
 - **Backups:** nightly + pre-deploy snapshots of the collection volume; retain 7 daily + 4 weekly.
 

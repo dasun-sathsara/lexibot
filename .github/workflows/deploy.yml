@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*.*.*"]
 
 env:
@@ -34,7 +34,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
           flavor: |
             latest=auto
-            latest-branch=main
+            latest-branch=master
 
       - uses: docker/build-push-action@v5
         with:

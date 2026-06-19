@@ -109,7 +109,7 @@ Nightly volume snapshots (Anki collection + sync data, 7 daily + 4 weekly):
 ## CI/CD
 
 - **Every push/PR**: `ruff check`, `ruff format --check`, `mypy`, `pytest` via GitHub Actions.
-- **Push to `main`**: builds and pushes a Docker image to GHCR.
+- **Push to `master`**: builds and pushes a Docker image to GHCR.
 - **Version tag `vX.Y.Z`**: deploys to the VPS (`docker compose pull && up -d`).
 
 Required GitHub Actions secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.

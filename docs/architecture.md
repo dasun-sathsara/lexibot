@@ -32,7 +32,7 @@ lexibot/
 ├── Caddyfile
 ├── .github/workflows/
 │   ├── ci.yml                # ruff + mypy + pytest on PR/push
-│   └── deploy.yml            # build→GHCR on main; deploy on vX.Y.Z tag
+│   └── deploy.yml            # build→GHCR on master; deploy on vX.Y.Z tag
 ├── deploy/
 │   ├── ansible/              # one-shot VPS provisioning
 │   └── backup/snapshot.sh    # nightly + pre-deploy collection snapshots
@@ -369,7 +369,7 @@ asyncio_mode = "auto"
 
 - **Dockerfile** — multi-stage: `uv sync --frozen` into a venv, copy into a slim `python:3.12-slim` runtime; non-root user; `python -m lexibot`.
 - **`ci.yml`** — `ruff check`, `ruff format --check`, `mypy`, `pytest` on every PR/push.
-- **`deploy.yml`** — on push to `main` build + push images to GHCR; on a `vX.Y.Z` tag, SSH to the VPS and `docker compose pull && up -d`. Last ~5 image tags retained for rollback.
+- **`deploy.yml`** — on push to `master` build + push images to GHCR; on a `vX.Y.Z` tag, SSH to the VPS and `docker compose pull && up -d`. Last ~5 image tags retained for rollback.
 
 ## 13. Testing strategy
 
