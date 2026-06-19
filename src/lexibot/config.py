@@ -43,7 +43,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/vocab.db"
 
     # Observability / misc
-    datadog_api_key: SecretStr | None = None
     tz: str = "Asia/Colombo"
     log_level: str = "INFO"
 

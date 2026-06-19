@@ -40,7 +40,7 @@ lexibot/
 │   ├── __init__.py
 │   ├── __main__.py           # `python -m lexibot` → launches webhook app
 │   ├── config.py             # pydantic-settings Settings + get_settings()
-│   ├── logging.py            # structlog + Datadog formatting
+│   ├── logging.py            # structlog formatting
 │   ├── app.py                # FastAPI app, webhook route, lifespan wiring
 │   ├── container.py          # composition root (builds adapters, DI)
 │   ├── bot/
@@ -186,7 +186,6 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///data/vocab.db"
 
     # Observability / misc
-    datadog_api_key: SecretStr | None = None
     tz: str = "Asia/Colombo"
     log_level: str = "INFO"
 
@@ -447,7 +446,7 @@ class ProcessedItem(SQLModel, table=True):
 ## 11. Observability
 
 - **`structlog`** emitting JSON to stdout; request-scoped context (user id, job id) bound in middleware.
-- Docker `json-file` log driver, rotated (10 MB × 5); shipped to **Datadog Student Pro** via the Datadog agent / OTLP.
+- Docker `json-file` log driver, rotated (10 MB × 5).
 - **Alerts** — `observability/alerts.py` DMs the admin Telegram id when an item exhausts retries.
 
 ## 12. Build, packaging & CI/CD

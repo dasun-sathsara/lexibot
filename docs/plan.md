@@ -287,7 +287,7 @@ A relentless, branch-by-branch review resolved every remaining dependency. Summa
 **Observability**
 
 - **Failure alerts:** Telegram DM to admin on repeated failures.
-- **Logs:** structlog JSON to stdout (Docker `json-file`, rotated 10 MB × 5), shipped to **Datadog Student Pro** (free via GitHub Student Pack — 10 hosts, 500 GB logs/mo, alerts).
+- **Logs:** structlog JSON to stdout (Docker `json-file`, rotated 10 MB × 5).
 
 ## 13. References
 
