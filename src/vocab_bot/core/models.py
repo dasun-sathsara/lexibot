@@ -119,9 +119,7 @@ class Card(BaseModel):
             word_audio, ex1_audio, ex2_audio = audio
             media = (
                 MediaClip(
-                    filename=media_filename(
-                        sense.headword, sense.headword, gender=gender
-                    ),
+                    filename=media_filename(sense.headword, sense.headword, gender=gender),
                     field=FIELD_WORD_PRON,
                     audio=word_audio,
                 ),
