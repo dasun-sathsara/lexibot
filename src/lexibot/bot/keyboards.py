@@ -24,3 +24,35 @@ def preview_keyboard(token: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="\u274c Discard", callback_data=f"{CB_DISCARD}:{token}"),
     )
     return builder.as_markup()
+
+
+def completed_keyboard(results: list[dict[str, str]]) -> InlineKeyboardMarkup | None:
+    """Inline keyboard for completed words.
+
+    Includes Edit Meaning, Regen Examples, and Delete Card buttons.
+    """
+    completed = [r for r in results if r.get("outcome") in ("added", "rewritten")]
+    if not completed:
+        return None
+
+    builder = InlineKeyboardBuilder()
+    if len(completed) == 1:
+        item = completed[0]
+        wf = item["word"]
+        builder.row(
+            InlineKeyboardButton(text="✏️ Edit Meaning", callback_data=f"edit_meaning:{wf}"),
+            InlineKeyboardButton(text="🔄 Regen Examples", callback_data=f"regen_examples:{wf}"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🗑️ Delete Card", callback_data=f"delete_card:{wf}"),
+        )
+    else:
+        for item in completed:
+            wf = item["word"]
+            hw = item.get("headword", wf.split(":", 1)[-1])
+            builder.row(
+                InlineKeyboardButton(text=f"✏️ Edit ({hw})", callback_data=f"edit_meaning:{wf}"),
+                InlineKeyboardButton(text=f"🔄 Regen ({hw})", callback_data=f"regen_examples:{wf}"),
+                InlineKeyboardButton(text=f"🗑️ Delete ({hw})", callback_data=f"delete_card:{wf}"),
+            )
+    return builder.as_markup()

@@ -22,6 +22,51 @@ _BUCKET_LABEL = {
     ItemOutcome.SKIPPED: "\u23ed\ufe0f Skipped",
 }
 
+POS_NAMES = {
+    "n": "noun",
+    "v": "verb",
+    "adj": "adjective",
+    "adv": "adverb",
+    "prep": "preposition",
+    "conj": "conjunction",
+    "pron": "pronoun",
+    "phr": "phrase",
+}
+
+
+def render_card_preview(results: list[dict[str, str]]) -> str:
+    """Render a preview of completed cards in the batch."""
+    completed = [r for r in results if r.get("outcome") in ("added", "rewritten")]
+    if not completed:
+        parts = ["❌ **Batch Processing Failed**", ""]
+        for res in results:
+            word = res.get("word", "unknown")
+            err = res.get("error", "unknown error")
+            parts.append(f"* `{word}` — Failed: {err}")
+        return "\n".join(parts)
+
+    parts = ["✅ **Batch Processing Complete**"]
+    for i, res in enumerate(completed, 1):
+        pos = res.get("pos", "")
+        pos_full = POS_NAMES.get(pos, pos)
+        hw = res.get("headword", "")
+        si = res.get("si_meaning", "")
+        en = res.get("en_meaning", "")
+        ex1 = res.get("sentence_1", "")
+        ex2 = res.get("sentence_2", "")
+
+        parts.append("")
+        parts.append("---")
+        parts.append(f"**{i}. {hw}** ({pos_full})")
+        parts.append(f"* **Meaning**: {si}")
+        parts.append(f"* **Definition**: {en}")
+        parts.append("* **Examples**:")
+        parts.append(f"  1. *{ex1}*")
+        if ex2:
+            parts.append(f"  2. *{ex2}*")
+
+    return "\n".join(parts)
+
 
 def safe_markdown(text: str) -> str:
     """Escape arbitrary text for Telegram MarkdownV2."""

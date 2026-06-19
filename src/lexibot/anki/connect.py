@@ -115,6 +115,9 @@ class AnkiConnect:
     async def store_media_file(self, filename: str, data_b64: str) -> None:
         await self._invoke("storeMediaFile", filename=filename, data=data_b64)
 
+    async def delete_notes(self, note_ids: list[int]) -> None:
+        await self._invoke("deleteNotes", notes=note_ids)
+
     async def sync(self) -> None:
         await self._invoke("sync")
 

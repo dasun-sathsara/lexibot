@@ -10,6 +10,7 @@ failure: the card is still written (text only) and audio is flagged for later re
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -103,12 +104,21 @@ class Pipeline:
         self._limits = limits or PipelineLimits()
         self._tts_sem = asyncio.Semaphore(self._limits.tts)
 
-    async def process(self, sense: Sense) -> WordResult:
+    async def process(
+        self,
+        sense: Sense,
+        on_state_change: Callable[[str], Awaitable[None]] | None = None,
+    ) -> WordResult:
         """Process one enriched word end-to-end."""
         if not sense.is_valid_word:
             return WordResult(sense.word_field, ItemOutcome.SKIPPED)
 
+        if on_state_change:
+            await on_state_change("tts")
         audio = await synthesize_clips(sense, self._tts, tts_sem=self._tts_sem)
+
+        if on_state_change:
+            await on_state_change("anki")
         card: Card = Card.from_sense(sense, audio=audio, gender=self._gender)
         outcome = await self._anki.upsert(card)
         return WordResult(sense.word_field, outcome, audio_failed=audio is None)
