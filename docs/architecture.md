@@ -26,7 +26,7 @@ lexibot/
 ├── pyproject.toml            # PEP 621 metadata + ruff/mypy/pytest config
 ├── uv.lock
 ├── .env.example
-├── .pre-commit-config.yaml
+├── .gitignore
 ├── Dockerfile                # multi-stage, uv-based
 ├── docker-compose.yml        # bot, worker, redis, anki-headless, anki-sync-server, caddy
 ├── Caddyfile
@@ -124,6 +124,12 @@ lexibot/
 
 All services run on the single Ubuntu LTS VPS via Docker Compose; **Caddy** terminates TLS and proxies the webhook. `anki-headless` and `anki-sync-server` hold persistent volumes; everything else is stateless and replaceable.
 
+### 3.1 Service & Ingress Details
+
+- **Caddy Ingress:** Caddy routes external traffic to the FastAPI webhook application. The `Caddyfile` uses explicit `handle` blocks to map `/webhook` and `/healthz` to the bot service, returning a `404` for any unhandled routes. Caddy reads the public `DOMAIN` variable via environment substitution, which Docker Compose passes using `env_file: .env`.
+- **Anki Headless:** The `anki-headless` service uses the `mlcivilengineer/anki-desktop-docker:main` image. It connects to the sync server via the `SYNC_SERVER` environment variable.
+- **Anki Sync Server:** To authenticate local or remote devices (like a mobile client), the `anki-sync-server` service requires a `SYNC_USER1` environment variable (e.g. `SYNC_USER1=anki:password`) supplied via the `.env` file.
+
 ## 4. Request lifecycle
 
 1. **Ingress** — Telegram → Caddy → FastAPI webhook → aiogram dispatcher.
@@ -143,40 +149,50 @@ Typed, validated, secret-aware settings via `pydantic-settings`; secrets are `Se
 
 ```python
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_prefix="VB_", extra="ignore"
     )
 
+    # Telegram
     telegram_token: SecretStr
-    allowed_ids: list[int] = Field(default_factory=list)
+    allowed_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
+    webhook_secret: SecretStr | None = None
+    webhook_base_url: str | None = None
+    admin_id: int | None = None
 
-    gemini_api_keys: list[SecretStr]          # VB_GEMINI_API_KEYS="k1,k2,k3"
+    # Gemini
+    gemini_api_keys: Annotated[list[SecretStr], NoDecode]  # VB_GEMINI_API_KEYS="k1,k2,k3"
     gemini_model: str = "gemini-3.5-flash"
+    gemini_cooldown_s: float = 60.0
 
+    # Azure MAI-Voice-2
     azure_speech_key: SecretStr
     azure_speech_endpoint: str
     voice_gender: Literal["female", "male"] = "female"
 
+    # Anki
     ankiconnect_url: str = "http://anki-headless:8765"
     target_deck: str = "Daily"
     note_type: str = "Eng Vocab 2 Examples"
 
+    # Infra
     redis_dsn: str = "redis://redis:6379/0"
     database_url: str = "sqlite+aiosqlite:///data/vocab.db"
 
+    # Observability / misc
     datadog_api_key: SecretStr | None = None
     tz: str = "Asia/Colombo"
+    log_level: str = "INFO"
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
-```
+    return Settings()
 
 ## 6. Domain model (`core`)
 
@@ -222,18 +238,19 @@ Each integration is a `Protocol` in `*/ports.py`; the pipeline is written agains
 
 ```python
 from typing import Protocol
+from lexibot.core.enums import ItemOutcome
+from lexibot.core.models import Card, RawItem, Sense
 
 class LanguageModel(Protocol):
-    async def enrich(self, items: list[str], *, sense_hint: str | None = None) -> list[Sense]: ...
+    async def enrich(self, items: list[RawItem], *, sense_hint: str | None = None) -> list[Sense]: ...
 
 class Synthesizer(Protocol):
     async def synthesize(self, text: str, *, slow: bool = False) -> bytes: ...
 
 class AnkiGateway(Protocol):
-    async def upsert(self, card: "Card") -> ItemOutcome: ...
+    async def upsert(self, card: Card) -> ItemOutcome: ...
     async def sync(self) -> None: ...
 ```
-
 ### 7.1 Gemini key pool (`llm/keypool.py`)
 
 Round-robin with per-key cooldown; concurrency scales with the number of keys.
@@ -247,70 +264,156 @@ class GeminiKeyPool:
     def __init__(self, keys: list[str], cooldown_s: float = 60.0) -> None:
         if not keys:
             raise ValueError("at least one Gemini key required")
-        self._keys = keys
-        self._ring = itertools.cycle(keys)
+        self._keys = list(keys)
+        self._ring = itertools.cycle(self._keys)
         self._until: dict[str, float] = {}
         self._lock = asyncio.Lock()
         self._cooldown_s = cooldown_s
 
     async def acquire(self) -> str:
-        async with self._lock:
-            for _ in range(len(self._keys)):
-                key = next(self._ring)
-                if self._until.get(key, 0.0) <= time.monotonic():
-                    return key
-            soonest = min(self._until.values())
-        await asyncio.sleep(max(0.0, soonest - time.monotonic()))
-        return await self.acquire()
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                for _ in range(len(self._keys)):
+                    key = next(self._ring)
+                    if self._until.get(key, 0.0) <= now:
+                        return key
+                wait = max(0.0, min(self._until.values()) - now)
+            await asyncio.sleep(wait)
 
     def penalize(self, key: str) -> None:        # called on HTTP 429
         self._until[key] = time.monotonic() + self._cooldown_s
 ```
-
 ### 7.2 SSML builder (`tts/ssml.py`)
 
 ```python
-VOICES = {
+from xml.sax.saxutils import escape, quoteattr
+
+VOICES: dict[str, str] = {
     "female": "en-US-Harper:MAI-Voice-2",
     "male": "en-US-Ethan:MAI-Voice-2",
 }
 
+def voice_for(gender: str) -> str:
+    return VOICES[gender]
+
 def build_ssml(text: str, *, gender: str, slow: bool) -> str:
     rate = "-15%" if slow else "0%"
-    voice = VOICES[gender]
+    voice = voice_for(gender)
+    safe_text = escape(text, {'"': "&quot;", "'": "&apos;"})
+    voice_attr = quoteattr(voice)
+    rate_attr = quoteattr(rate)
     return (
         '<speak version="1.0" xml:lang="en-US">'
-        f'<voice name="{voice}">'
-        f'<prosody rate="{rate}">{text}</prosody>'
+        f"<voice name={voice_attr}>"
+        f"<prosody rate={rate_attr}>{safe_text}</prosody>"
         "</voice></speak>"
     )
 ```
-
 ### 7.3 Anki upsert (`anki/upsert.py`)
 
 ```python
-async def upsert(self, card: Card) -> ItemOutcome:
-    query = f'"note:{self.note_type}" "Word:{escape(card.word_field)}"'
-    note_ids = await self._connect.find_notes(query)   # collection-wide
-    if note_ids:
-        await self._connect.update_note_fields(note_ids[0], card.fields)
-        await self._media.attach(note_ids[0], card.media)
-        return ItemOutcome.REWRITTEN
-    await self._connect.add_note(card, allow_duplicate=True)
-    return ItemOutcome.ADDED
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from lexibot.core.enums import ItemOutcome
+from lexibot.core.models import Card
+from lexibot.anki.ports import AnkiConnectClient
+from lexibot.anki.connect import build_find_query
+from lexibot.anki.media import MediaStore
+
+BOT_TAG = "tgbot"
+
+def date_tag(now: datetime, tz: str) -> str:
+    local = now.astimezone(ZoneInfo(tz))
+    return f"added::{local:%Y-%m-%d}"
+
+class AnkiUpsertGateway:
+    def __init__(
+        self,
+        client: AnkiConnectClient,
+        *,
+        deck: str,
+        note_type: str,
+        tz: str = "Asia/Colombo",
+    ) -> None:
+        self._client = client
+        self._media = MediaStore(client)
+        self._deck = deck
+        self._note_type = note_type
+        self._tz = tz
+
+    def _tags(self, now: datetime | None = None) -> list[str]:
+        return [BOT_TAG, date_tag(now or datetime.now(tz=ZoneInfo(self._tz)), self._tz)]
+
+    async def upsert(self, card: Card) -> ItemOutcome:
+        query = build_find_query(self._note_type, card.word_field)
+        note_ids = await self._client.find_notes(query)
+        if note_ids:
+            note_id = note_ids[0]
+            await self._client.update_note_fields(note_id, card.fields)
+            await self._client.update_note_tags(note_id, self._tags())
+            await self._media.store(card)
+            return ItemOutcome.REWRITTEN
+
+        await self._media.store(card)
+        await self._client.add_note(
+            deck=self._deck,
+            note_type=self._note_type,
+            fields=card.fields,
+            tags=self._tags(),
+            allow_duplicate=True,
+        )
+        return ItemOutcome.ADDED
+
 ```
+### 7.4 Worker settings (`worker/settings.py`)
 
-## 8. Structured concurrency in the pipeline
-
-The three audio clips per card are generated with `asyncio.TaskGroup` (PEP 654): if any clip fails, the group cancels siblings and raises an `ExceptionGroup`, which the worker maps to a graceful partial-failure (card added, audio flagged for retry).
+The ARQ worker is configured to read the Redis connection URL from the app settings. To prevent potential startup crashes (e.g., if configuration fails or during test initialization where a mock environment may be used), `WorkerSettings` loads Redis settings defensively using a safe class attribute with a try-except fallback.
 
 ```python
-async def build_card(sense: Sense, tts: Synthesizer, gender: str) -> Card:
-    async with asyncio.TaskGroup() as tg:
-        word = tg.create_task(tts.synthesize(sense.headword, slow=True))
-        ex1 = tg.create_task(tts.synthesize(sense.sentence_1))
-        ex2 = tg.create_task(tts.synthesize(sense.sentence_2))
-    return Card.from_sense(sense, audio=(word.result(), ex1.result(), ex2.result()))
+from typing import Any, ClassVar
+from arq.connections import RedisSettings
+from lexibot.config import get_settings
+from lexibot.worker.tasks import process_chunk
+
+class WorkerSettings:
+    """ARQ entrypoint: `arq lexibot.worker.settings.WorkerSettings`."""
+
+    functions: ClassVar[list[Any]] = [process_chunk]
+    on_startup = startup
+    on_shutdown = shutdown
+    max_tries = 5
+    job_timeout = 300
+
+    try:
+        redis_settings = RedisSettings.from_dsn(get_settings().redis_dsn)
+    except Exception:
+        redis_settings = RedisSettings()
+```
+## 8. Structured concurrency in the pipeline
+
+The three audio clips per card are generated with `asyncio.TaskGroup` (PEP 654): if any clip fails, the group cancels siblings and raises an `ExceptionGroup` (caught via `except*` as a group of `TTSError`s), which is mapped to a graceful partial-failure (card added, audio flagged for retry).
+
+```python
+async def synthesize_clips(
+    sense: Sense, tts: Synthesizer, *, tts_sem: asyncio.Semaphore
+) -> tuple[bytes, bytes, bytes] | None:
+    async def _one(text: str, *, slow: bool) -> bytes:
+        async with tts_sem:
+            return await tts.synthesize(text, slow=slow)
+
+    failed = False
+    try:
+        async with asyncio.TaskGroup() as tg:
+            word = tg.create_task(_one(sense.headword, slow=True))
+            ex1 = tg.create_task(_one(sense.sentence_1, slow=False))
+            ex2 = tg.create_task(_one(sense.sentence_2, slow=False))
+    except* TTSError as eg:
+        log.warning("tts.partial_failure", word=sense.word_field, errors=len(eg.exceptions))
+        failed = True
+    if failed:
+        return None
+    return (word.result(), ex1.result(), ex2.result())
 ```
 
 Global limits are enforced with `asyncio.Semaphore`: `min(len(keys), 3)` concurrent chunks for the LLM, and a separate semaphore of 4 around `tts.synthesize`.
@@ -320,16 +423,18 @@ Global limits are enforced with `asyncio.Semaphore`: `min(len(keys), 3)` concurr
 SQLite via async SQLAlchemy/SQLModel. Tables: `user_settings` (per-user model/voice), `processed_item` (idempotency keys + last outcome), `audit_log`. Schema is created with `SQLModel.metadata.create_all` for v1; **Alembic** is introduced at the first migration.
 
 ```python
-from datetime import datetime
+from datetime import UTC, datetime
 from sqlmodel import SQLModel, Field
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
 class ProcessedItem(SQLModel, table=True):
-    job_id: str = Field(primary_key=True)        # w:<user>:<pos>:<headword>
+    job_id: str = Field(primary_key=True)        # w:<user>:<normalized_word>
     user_id: int = Field(index=True)
     word_field: str = Field(index=True)
     outcome: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-```
+    created_at: datetime = Field(default_factory=_utcnow)
 
 ## 10. Error handling & resilience
 
@@ -389,4 +494,4 @@ asyncio_mode = "auto"
 
 - **Memory image on the card** (plan §11a) — would add an `images/` adapter package behind an `ImageSource` Protocol (stock search → AI fallback) and a `picture` payload on the Anki upsert. Out of scope for v1.
 
-Telegram → Anki Vocabulary Bot — Unit Test Spec
+Telegram → Anki LexiBot — Unit Test Spec

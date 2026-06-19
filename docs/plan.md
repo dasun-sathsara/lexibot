@@ -40,14 +40,14 @@ This is the crux. **[DECIDED — Q1] Option A (Headless Anki + AnkiConnect).** T
 <aside>
 🔑
 
-**Headless login gotcha.** Anki 24.11 / 25.x removed programmatic `sync_login` (email+password → hkey), so a fully scripted login is no longer supported. The headless Anki container needs a **one-time GUI login via Xvfb/VNC** to point it at the self-hosted sync server and store the session, after which AnkiConnect's `sync` works unattended. A community Docker image (Feb 2026) bundles the sync server + a browser-based desktop with AnkiConnect pre-installed, which sidesteps most of this.
+A community Docker image like `mlcivilengineer/anki-desktop-docker:main` provides a browser-based desktop with AnkiConnect pre-installed, which we co-locate with a separate self-hosted sync server container (`chrislongros/anki-sync-server-enhanced:latest`).
 
 </aside>
 
 ## 4. Proposed architecture (assuming Option A)
 
 ```jsx
-Telegram  ──webhook──▶  Bot service (Python, aiogram/python-telegram-bot)
+Telegram  ──webhook──▶  Bot service (Python, aiogram)
                               │
                               ├─▶ Job queue (per-word tasks, 10-word LLM chunks)
                               │
@@ -71,16 +71,16 @@ Telegram  ──webhook──▶  Bot service (Python, aiogram/python-telegram-b
 Goal: **full unattended deployment.** Proposed stack:
 
 - **Orchestration:** one `docker-compose.yml` on the VPS; every service `restart: unless-stopped`.
-- **TLS + reverse proxy:** **Caddy** — automatic Let's Encrypt certs with a ~3-line config, fronting the bot's Telegram webhook (and any admin endpoint).
-- **[DECIDED] CI/CD — push-based:** GitHub Actions builds images on push → pushes to **GHCR** → deploys over SSH to the existing **Ubuntu LTS VPS** (`docker compose pull && docker compose up -d`). Version-pinned and predictable. (Pull-based auto-update via What's Up Docker / a Watchtower fork was the alternative — not chosen.)
-- **[DECIDED] Box provisioning:** VPS already exists (Ubuntu LTS) — a one-shot Ansible playbook (or bootstrap script) installs Docker + Compose and clones the repo; secrets injected via `.env` / Docker secrets, never committed.
-- **Backups & health:** use a sync-server image with built-in backups/healthchecks (e.g. `chrislongros/anki-sync-server-enhanced`) and snapshot the collection volume on a schedule.
+- **TLS + reverse proxy:** **Caddy** — automatic TLS (Let's Encrypt) config using `handle` blocks (routing `/webhook` and `/healthz` to the bot) and reading the domain from the `.env` file via `env_file: .env`.
+- **[DECIDED] CI/CD — push-based:** GitHub Actions builds images on push → pushes to **GHCR** → deploys over SSH to the existing **Ubuntu LTS VPS** (`docker compose pull && docker compose up -d`). Version-pinned and predictable.
+- **[DECIDED] Box provisioning:** VPS already exists (Ubuntu LTS) — a one-shot Ansible playbook (or bootstrap script) installs Docker + Compose and clones the repo; secrets are injected via the `.env` file, never committed.
+- **Backups & health:** use a sync-server image (`chrislongros/anki-sync-server-enhanced:latest`) and snapshot both the sync-server data (`lexibot_anki-sync-data`) and headless profile (`lexibot_anki-profile`) volumes on a nightly/pre-deploy schedule.
 
 ### 4b. The one hard constraint: Anki auth bootstrap
 
 Recent Anki (24.11 / 25.x) removed scripted `sync_login()`, so a client can't log in fully headlessly with email+password anymore. Three ways around it for our self-hosted server:
 
-- **A. Headless Anki Desktop + AnkiConnect (recommended).** Use an image like `ThisIsntTheWay/headless-anki` or `mlcivilengineer/anki-desktop-docker` (browser/VNC desktop, AnkiConnect preinstalled). Point its profile at the local sync server; log in **once** via the built-in web desktop. The authenticated profile then lives in a persistent volume (and backups), so redeploys stay zero-touch — i.e. one ~30-second manual step at first provisioning, fully unattended thereafter.
+- **A. Headless Anki Desktop + AnkiConnect (recommended).** Use the `mlcivilengineer/anki-desktop-docker:main` image (browser/VNC desktop, AnkiConnect preinstalled). Point its profile at the local sync server, and log in **once** via the built-in web desktop. The authenticated profile then lives in a persistent volume (and backups), so redeploys stay zero-touch — i.e. one ~30-second manual step at first provisioning, fully unattended thereafter. The self-hosted sync server requires `SYNC_USER1` to be configured in `.env` (e.g. `SYNC_USER1=anki:password`) for authentication.
 - **B. `anki` Python lib, direct.** The bot opens a collection with the `anki` package, adds notes, and calls `col.sync_collection(SyncAuth(...))` against the local server. Avoids running a desktop, but auth + sync-conflict handling is fiddlier and less battle-tested.
 - **C. genanki `.apkg`.** No login needed, but no auto-sync — already rejected.
 
@@ -125,10 +125,10 @@ Three message formats he sends:
 
 ## 7. LLM workflow
 
-- Single structured call per word (or per 10-word chunk) returning JSON: `{headword, part_of_speech, en_meaning, si_meaning, sentence_1, sentence_2}` via `google-genai` structured output. The `Word` field is then composed as `"<part_of_speech>:<headword>"` to match the deck's existing convention (e.g. `adj:artificial`).
+- Single structured call per 10-word chunk returning JSON containing a list of objects with fields: `{headword, part_of_speech, is_valid_word, en_meaning, si_meaning, sentence_1, sentence_2}` via `google-genai` structured output (Pydantic schema `ChunkResponse`). The `Word` field is then composed as `"<part_of_speech>:<headword>"` to match the deck's existing convention (e.g. `adj:artificial`).
 - **[DECIDED — Q6] Both models, selectable.** Expose model choice as config (and optionally a `/model` bot command): `gemini-3.5-flash` (default — cheaper/faster) and `gemini-3.1-pro-preview` (higher quality). Same `google-genai` call path; only the model string changes.
 - **Free tier:** `gemini-3.5-flash` **has a free tier** (~10 RPM / ~1,500 RPD / ~250K TPM; free-tier inputs may be used to improve Google's products). `gemini-3.1-pro-preview` is **paid-only** — Google removed Pro models from the free API tier on Apr 1, 2026 ($2 / $12 per 1M in/out). So Flash is the free default; Pro incurs cost per call.
-- **[DECIDED] TTS — MAI-Voice-2** (Azure AI Foundry, resource `centurion-us`, confirmed in your subscription). From the Foundry code sample: use the Azure Speech SDK with `speechsdk.SpeechConfig(subscription=speech_key, endpoint=base_endpoint)` where `base_endpoint = https://centurion-us-resource.cognitiveservices.azure.com/`; set `speech_config.speech_synthesis_voice_name = "<lang>-<Name>:MAI-Voice-2"` (e.g. `en-US-<Name>:MAI-Voice-2`); input is **plain text or SSML** (use SSML for pacing/emphasis); set `set_speech_synthesis_output_format(...)` to an **mp3** profile so files are Anki-friendly. Generate audio for the word + both example sentences, store each via AnkiConnect `storeMediaFile`, and reference with `[sound:...]` in the fields.
+- **[DECIDED] TTS — MAI-Voice-2** (Azure AI Foundry, resource `centurion-us`, confirmed in your subscription). From the Foundry code sample: use the Azure Speech SDK with `speechsdk.SpeechConfig(subscription=speech_key, endpoint=base_endpoint)` where `base_endpoint = https://centurion-us-resource.cognitiveservices.azure.com/`; input is **plain text or SSML** (use SSML for pacing/emphasis, specifying `<voice name="en-US-Harper:MAI-Voice-2">` or `<voice name="en-US-Ethan:MAI-Voice-2">`); set `set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3)` so files are Anki-friendly. Generate audio for the word + both example sentences, store each via AnkiConnect `storeMediaFile`, and reference with `[sound:...]` in the fields.
 - ✅ **Region/credits resolved:** the `centurion-us` resource is in your subscription, so the earlier US-region concern no longer applies.
 - **[DECIDED] Voice — `en-US-Harper:MAI-Voice-2` (default, female) ↔ `en-US-Ethan:MAI-Voice-2` (male)** via a `VOICE_GENDER` config; both are the style-capable, most natural en-US MAI-Voice-2 voices. (Also available: `en-US-Iris` F; `en-US-Grant` / `en-US-Jasper` M.)
 - **[DECIDED] SSML pacing for A2–B1:** the **word** is synthesized slightly slower (`<prosody rate="-15%">`) for clarity; example sentences at near-normal rate, neutral style; 24 kHz mp3.
@@ -181,7 +181,7 @@ These were previously implicit; now stated explicitly so nothing is ambiguous:
 
 **Background processing:** `ARQ` (asyncio-native task queue) on `Redis` for the per-word job queue, retries, and 10-word LLM chunking; Redis also holds transient job/progress state.
 
-**Persistence:** `SQLite` (via `SQLModel` / SQLAlchemy) for durable records — processed-word idempotency keys, per-user settings, audit log. (Move to Postgres only if it grows.)
+**Persistence:** `SQLite` (via `SQLModel` / `aiosqlite`) for durable records — processed-word idempotency keys, per-user settings, audit log. (Move to Postgres only if it grows.)
 
 **LLM:** `google-genai` (Google Gen AI SDK) with Pydantic structured output. Default `gemini-3.5-flash`; optional `gemini-3.1-pro-preview`.
 
@@ -194,6 +194,25 @@ These were previously implicit; now stated explicitly so nothing is ambiguous:
 **Infra:** Docker + Docker Compose (services: `bot`, `worker`, `redis`, `anki-headless`, `anki-sync-server`, `caddy`); Caddy for automatic TLS; GitHub Actions → GHCR → SSH deploy; Ansible/bootstrap for the VPS.
 
 **Dev quality:** `uv` (deps), `ruff` (lint + format), `mypy` (types), `pytest` + `pytest-asyncio` + `respx` (tests), `pre-commit`.
+
+### 10a. Codebase & Module Structure
+
+The package is structured as a modular Python application under `src/lexibot/`:
+
+- `src/lexibot/`
+  - `__main__.py` — Package entrypoint.
+  - `app.py` — FastAPI application configuration and webhook setup.
+  - `config.py` — Config parsing using `pydantic-settings` (prefixed with `VB_`).
+  - `container.py` — Dependency injection container.
+  - `logging.py` — Structured logging configuration (scrubbing secrets from `structlog`).
+  - `anki/` — AnkiConnect interface, media storage, and upsert pipeline (`connect.py`, `media.py`, `upsert.py`).
+  - `bot/` — Telegram bot layers: handlers, middlewares, rendering helpers, keyboards (`dispatcher.py`, `rendering.py`, `keyboards.py`).
+  - `core/` — Core types, domain models, pipeline logic, and parsers (`pipeline.py`, `parsing.py`, `exceptions.py`).
+  - `db/` — Database engine configuration and repository pattern implementations (`engine.py`, `tables.py`, `repositories.py`).
+  - `llm/` — Gemini API integration, key pool rotation logic, prompts, and schema (`gemini.py`, `keypool.py`, `schema.py`).
+  - `observability/` — Failure alerts and health checks (`alerts.py`).
+  - `tts/` — Text-to-speech integration with MAI-Voice-2 via Azure Speech SDK (`mai_voice.py`, `ssml.py`).
+  - `worker/` — ARQ worker definitions and background processing task settings (`tasks.py`, `settings.py`, `enqueue.py`).
 
 ## 11. UX enhancements
 
@@ -228,12 +247,14 @@ A relentless, branch-by-branch review resolved every remaining dependency. Summa
 
 **Transport & infra**
 
-- **Telegram transport:** **webhook** (a domain is available → Caddy issues TLS).
-- **Headless Anki image:** `mlcivilengineer/anki-desktop-docker` (browser desktop + AnkiConnect) for an easy one-time login.
+- **Telegram transport:** **webhook** (routing requests `/webhook` and `/healthz` to port 8080 of the bot).
+- **Caddy proxy:** Caddyfile routes incoming requests using `handle` blocks, reading the `DOMAIN` variable from `.env`.
+- **Headless Anki image:** `mlcivilengineer/anki-desktop-docker:main` (browser desktop + AnkiConnect on port 8765) for an easy one-time login.
 - **No startup checks:** assume `Daily` and `Eng Vocab 2 Examples` already exist; `addNote` surfaces an error if not.
 - **CI/CD:** build + push image on push to `master`; **deploy on a version tag** (`vX.Y.Z`); keep the last ~5 GHCR images for rollback.
-- **Secrets:** `.env` with locked file permissions on the VPS.
-- **Backups:** nightly + pre-deploy snapshots of the collection volume; retain 7 daily + 4 weekly.
+- **Secrets:** `.env` with locked file permissions on the VPS (variables prefixed with `VB_`, plus `SYNC_USER1` for the sync server).
+- **Backups:** nightly + pre-deploy snapshots of both the sync server (`lexibot_anki-sync-data`) and headless profile (`lexibot_anki-profile`) volumes; retain 7 daily + 4 weekly via a snapshot script.
+- **Worker settings:** `WorkerSettings` defines `redis_settings` using a safe class attribute with a `try-except` fallback to allow imports/builds without a `.env` file.
 
 **Generation pipeline**
 

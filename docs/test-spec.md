@@ -8,6 +8,7 @@ Companion to the Preliminary Plan and the Architecture. This is an implementatio
 ## How to use this doc
 
 - **Scope:** pure-logic and adapter-boundary unit tests. No live network, no real Anki, no real Azure/Gemini. All I/O is faked at the Protocol or HTTP (`respx`) boundary.
+  - **Current Status:** The repository implements the **pure-logic unit tests** in `tests/unit/`. Integration and adapter-boundary tests (e.g. involving mock clients/protocols, live networks, or subprocesses) are marked as *out of scope* for the current test suite, but are retained in this document as specifications for future coverage.
 - **Runner:** `pytest` + `pytest-asyncio` (`asyncio_mode = "auto"`), `respx` for httpx, `freezegun` or monkeypatched `time.monotonic` for timing.
 - **Convention:** test ids below (e.g. `PARSE-04`) should map to test function names like `test_parse_04_word_plus_meaning_colon`.
 - **Contracts first:** §1 fixes the behavioral contracts the tests assume. If the coder changes a contract, update these cases in lockstep.
@@ -40,10 +41,12 @@ These are the precise rules the tricky tests pin down. They resolve ambiguities 
 
 ### 1.4 Idempotency contract
 
-- ARQ job id = `f"w:{user_id}:{normalized_word_field}"` (deterministic). Re-enqueue with the same id while pending/running is a no-op (coalesced).
+- ARQ job id = `f"w:{user_id}:{normalized_headword}"` (deterministic). Re-enqueue with the same id while pending/running is a no-op (coalesced).
 - The Anki upsert is the **backstop**: even if a duplicate job runs, upsert prevents a second card.
 
-## 2. Message parsing — `core/parsing.py`
+## 2. Message parsing — `src/lexibot/core/parsing.py`
+ 
+ **Implemented in:** `tests/unit/test_parsing.py` (all tests PARSE-01 to PARSE-14).
 
 Highest-value target: ambiguity between "list of words" and "phrase" and "word+meaning."
 
@@ -88,7 +91,9 @@ def test_parse_message(raw, expected):
     assert [(i.headword, i.sense_hint) for i in parse_message(raw)] == expected
 ```
 
-## 3. Chunking & batch caps — `worker/enqueue.py`
+## 3. Chunking & batch caps — `src/lexibot/worker/enqueue.py`
+ 
+ **Implemented in:** `tests/unit/test_enqueue.py` (all tests CHUNK-01 to CHUNK-05).
 
 | ID       | Scenario                          | Expected                                                                               |
 | -------- | --------------------------------- | -------------------------------------------------------------------------------------- |
@@ -98,7 +103,9 @@ def test_parse_message(raw, expected):
 | CHUNK-04 | 65 items, soft cap 50             | first 50 processed; user warned remaining 15 were dropped (or deferred per cap policy) |
 | CHUNK-05 | duplicate word twice in one batch | same job id → enqueued once (coalesced)                                                |
 
-## 4. Gemini key pool — `llm/keypool.py`
+## 4. Gemini key pool — `src/lexibot/llm/keypool.py`
+ 
+ **Implemented in:** `tests/unit/test_keypool.py` (all tests KEY-01 to KEY-07).
 
 Timing-sensitive; monkeypatch `time.monotonic` and `asyncio.sleep`.
 
@@ -110,7 +117,7 @@ Timing-sensitive; monkeypatch `time.monotonic` and `asyncio.sleep`.
 | KEY-04 | cooldown expiry boundary                 | key reusable exactly at `monotonic == until` (uses `<=`)            |
 | KEY-05 | single key, penalized                    | acquire waits cooldown then returns the only key (no infinite loop) |
 | KEY-06 | empty key list at construction           | raises ValueError                                                   |
-| KEY-07 | concurrent acquires (asyncio.gather ×10) | no key handed out beyond its per-key RPM; lock prevents races       |
+| KEY-07 | concurrent acquires (asyncio.gather ×9)  | no key handed out beyond its per-key RPM; lock prevents races       |
 
 Skeleton:
 
@@ -138,7 +145,9 @@ async def test_key_06_empty_raises():
         GeminiKeyPool([])
 ```
 
-## 5. SSML builder — `tts/ssml.py`
+## 5. SSML builder — `src/lexibot/tts/ssml.py`
+ 
+ **Implemented in:** `tests/unit/test_ssml.py` (all tests SSML-01 to SSML-07).
 
 | ID      | Scenario                              | Expected                                                                                          |
 | ------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -172,9 +181,13 @@ def test_ssml_07_unknown_gender():
         build_ssml("x", gender="robot", slow=False)
 ```
 
-## 6. Anki upsert & query building — `anki/upsert.py`, `anki/connect.py`
-
-Fake the `AnkiConnect` client (Protocol) and assert decision + escaping.
+## 6. Anki upsert & query building — `src/lexibot/anki/upsert.py`, `src/lexibot/anki/connect.py`
+ 
+ **Implemented in:** `tests/unit/test_anki_query.py` (pure-logic tests: UPSERT-04 quote escaping and query escaping, UPSERT-06/07 media filename stability and cache-busting, UPSERT-08 collection-wide query).
+ 
+ **Out of scope:** UPSERT-01, UPSERT-02, UPSERT-03, and UPSERT-05 (which mock the AnkiConnect client decision path).
+ 
+ Fake the `AnkiConnect` client (Protocol) and assert decision + escaping.
 
 | ID        | Scenario                                       | Expected                                                                               |
 | --------- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -208,7 +221,9 @@ async def test_upsert_04_escapes_quote_in_query(fake_connect):
     assert r'\"' in query  # quote escaped inside the search term
 ```
 
-## 7. Structured concurrency & partial failure — `core/pipeline.py`
+## 7. Structured concurrency & partial failure — `src/lexibot/core/pipeline.py`
+ 
+ **Out of scope:** All tests (PIPE-01 to PIPE-06) require mocking the pipeline/TTS/LLM and are out of scope for the current pure-logic suite.
 
 | ID      | Scenario                           | Expected                                                                                                     |
 | ------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -228,7 +243,9 @@ async def test_pipe_04_tts_concurrency_capped():
     assert gate.max_observed <= 4
 ```
 
-## 8. Retry / backoff / 429 handling — adapters + `tenacity`
+## 8. Retry / backoff / 429 handling — `src/lexibot/anki/connect.py`, `src/lexibot/llm/gemini.py` (with `tenacity`)
+ 
+ **Out of scope:** All tests (RETRY-01 to RETRY-06) require HTTP-level mocking (`respx`) or mock clients and are out of scope for the current pure-logic suite.
 
 | ID       | Scenario                                   | Expected                                                                                            |
 | -------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -241,7 +258,11 @@ async def test_pipe_04_tts_concurrency_capped():
 
 Use `respx` to script status-code sequences; assert `pool.penalize` called with the right key on 429.
 
-## 9. Idempotency — `worker/enqueue.py`, `worker/tasks.py`
+## 9. Idempotency — `src/lexibot/worker/enqueue.py`, `src/lexibot/worker/tasks.py`
+ 
+ **Implemented in:** `tests/unit/test_enqueue.py` (pure-logic tests: IDEM-01, IDEM-02, IDEM-05).
+ 
+ **Out of scope:** IDEM-03 and IDEM-04 (which require a live ARQ/Redis + Anki).
 
 | ID      | Scenario                                     | Expected                                                                |
 | ------- | -------------------------------------------- | ----------------------------------------------------------------------- |
@@ -251,7 +272,9 @@ Use `respx` to script status-code sequences; assert `pool.penalize` called with 
 | IDEM-04 | duplicate job actually runs (race)           | upsert backstop → still one card (REWRITTEN second time, not a 2nd ADD) |
 | IDEM-05 | headword normalization in job id             | `Run` and `run` map to the same id (case-folded, trimmed)               |
 
-## 10. Outcome classification & batch summary — `bot/rendering.py`
+## 10. Outcome classification & batch summary — `src/lexibot/bot/rendering.py`
+ 
+ **Implemented in:** `tests/unit/test_rendering.py` (all tests SUM-01 to SUM-04).
 
 | ID     | Scenario                            | Expected                                                     |
 | ------ | ----------------------------------- | ------------------------------------------------------------ |
@@ -260,7 +283,9 @@ Use `respx` to script status-code sequences; assert `pool.penalize` called with 
 | SUM-03 | summary fits Telegram length limits | long batches truncated/paged, never exceed 4096 chars        |
 | SUM-04 | markdown-special chars in a word    | escaped via telegramify-markdown (no broken formatting)      |
 
-## 11. Invalid-word handling & LLM schema — `llm/schema.py`, `core/pipeline.py`
+## 11. Invalid-word handling & LLM schema — `src/lexibot/llm/schema.py`, `src/lexibot/core/pipeline.py`
+ 
+ **Out of scope:** All tests (VALID-01 to VALID-05) require LLM mock or pipeline mock integrations and are out of scope for the current pure-logic suite.
 
 | ID       | Scenario                                 | Expected                                                                     |
 | -------- | ---------------------------------------- | ---------------------------------------------------------------------------- |
@@ -270,7 +295,11 @@ Use `respx` to script status-code sequences; assert `pool.penalize` called with 
 | VALID-04 | sense_hint provided                      | prompt includes the hint; targeted sense honored in output mapping           |
 | VALID-05 | POS outside enum                         | validation error → item flagged, not crash                                   |
 
-## 12. Auth, config & secret hygiene
+## 12. Auth, config & secret hygiene — `src/lexibot/config.py`, `src/lexibot/logging.py`, `src/lexibot/bot/middlewares/auth.py`
+ 
+ **Implemented in:** `tests/unit/test_config.py` (CONF-01 to CONF-03, SEC-01 to SEC-02).
+ 
+ **Out of scope:** AUTH-01 and AUTH-02 (whitelist middleware authorization behavior, which require Telegram/update mocking).
 
 | ID      | Scenario                             | Expected                                                |
 | ------- | ------------------------------------ | ------------------------------------------------------- |
@@ -282,16 +311,20 @@ Use `respx` to script status-code sequences; assert `pool.penalize` called with 
 | SEC-01  | log an object containing a SecretStr | rendered as `**********`, never the raw value           |
 | SEC-02  | exception repr includes settings     | secret values not leaked in tracebacks                  |
 
-## 13. Shared fixtures (suggested `conftest.py`)
-
-- `fake_connect` — `AsyncMock` implementing the AnkiConnect Protocol (`find_notes`, `add_note`, `update_note_fields`, `store_media_file`, `sync`).
-- `fake_tts` / `ProbingSynthesizer` — records concurrency; can be told to fail the Nth call.
-- `fake_llm` — returns canned `Sense` objects; can emit malformed payloads.
-- `clock` — monkeypatched `time.monotonic`; `sleep_spy` — records `asyncio.sleep` durations without waiting.
-- `sample_card` / `make_card(word_field=...)` — card factory.
-- `make_items(n)` — generates n parsed items.
-- `respx_mock` — for Gemini/Azure/AnkiConnect HTTP-level tests.
-
+## 13. Shared fixtures (`tests/conftest.py`)
+ 
+ The following fixtures are **implemented** in `tests/conftest.py`:
+ - `clock` — monkeypatched `time.monotonic` for key-pool timing tests (`KEY-*`).
+ - `make_sense` — helper to generate `Sense` models.
+ - `sample_card` / `make_card` — test card factories.
+ - `make_items` — generates raw item fixtures.
+ - `sleep_spy` — spy to record `asyncio.sleep` durations without actual waiting.
+ 
+ The following dependency-mocking fixtures are **out of scope** (omitted in `tests/conftest.py`):
+ - `fake_connect` — `AsyncMock` implementing the AnkiConnect client.
+ - `fake_tts` / `ProbingSynthesizer` — mock TTS client.
+ - `fake_llm` — mock LLM client.
+ - `respx_mock` — for Gemini/Azure/AnkiConnect HTTP-level tests.
 ## 14. Priority order for the coder
 
 1. `PARSE-*` (correctness of everything downstream depends on it)
