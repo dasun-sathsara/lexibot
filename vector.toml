@@ -6,3 +6,4 @@ type = "axiom"
 inputs = ["docker_logs"]
 token = "${AXIOM_TOKEN}"
 dataset = "lexibot"
+region = "eu"
