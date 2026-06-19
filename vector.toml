@@ -6,5 +6,5 @@ type = "http"
 inputs = ["docker_logs"]
 uri = "https://api.eu.axiom.co/v1/datasets/lexibot/ingest"
 encoding.codec = "json"
-headers.Authorization = "Bearer ${AXIOM_TOKEN}"
+headers.Authorization = "${AXIOM_BEARER_TOKEN}"
 headers.Content-Type = "application/json"
