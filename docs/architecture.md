@@ -446,7 +446,7 @@ class ProcessedItem(SQLModel, table=True):
 ## 11. Observability
 
 - **`structlog`** emitting JSON to stdout; request-scoped context (user id, job id) bound in middleware.
-- Docker `json-file` log driver, rotated (10 MB × 5).
+- Docker `json-file` log driver, rotated (10 MB × 5); shipped to **Axiom** (free tier supports 500 GB logs/month and 30 days retention).
 - **Alerts** — `observability/alerts.py` DMs the admin Telegram id when an item exhausts retries.
 
 ## 12. Build, packaging & CI/CD

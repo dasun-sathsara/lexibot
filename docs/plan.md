@@ -287,7 +287,7 @@ A relentless, branch-by-branch review resolved every remaining dependency. Summa
 **Observability**
 
 - **Failure alerts:** Telegram DM to admin on repeated failures.
-- **Logs:** structlog JSON to stdout (Docker `json-file`, rotated 10 MB × 5).
+- **Logs:** structlog JSON to stdout (Docker `json-file`, rotated 10 MB × 5), shipped to **Axiom** (free tier supports 500 GB logs/month and 30 days retention).
 
 ## 13. References
 

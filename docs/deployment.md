@@ -104,3 +104,13 @@ Because Anki requires one-time sync server authentication and profile bootstrapp
    * The bot will display a single progress message updating in real-time (`Queue` -> `LLM` -> `TTS` -> `Anki` -> `Added`).
    * For single-word batches, once complete, the message updates to a rich Markdown card preview with `Edit Meaning`, `Regen Examples`, and `Delete Card` inline buttons.
    * For multi-word batches, the message updates to a clean outcome checklist.
+
+---
+
+## 6. Logs Shipping (Axiom)
+To ship your Docker stdout logs to Axiom (which offers a generous 500 GB/month free tier):
+1. **Create an Axiom Dataset & API Token**:
+   * Log in to [Axiom](https://axiom.co/) and create a dataset named `lexibot`.
+   * Go to settings and generate an API token with ingest permissions.
+2. **Configure Logs Shipping**:
+   * You can configure Docker to send logs via standard syslog, or run a lightweight agent like [Vector](https://vector.dev/) on the VPS to tail the Docker JSON log files and ship them directly to Axiom's OTLP/HTTP endpoint.
