@@ -5,6 +5,8 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from lexibot.core.enums import ItemOutcome
+
 # Callback action prefixes. Payload format: ``<action>:<token>``.
 CB_ADD = "add"
 CB_REGEN = "regen"
@@ -31,7 +33,9 @@ def completed_keyboard(results: list[dict[str, str]]) -> InlineKeyboardMarkup | 
 
     Includes Edit Meaning, Regen Examples, and Delete Card buttons.
     """
-    completed = [r for r in results if r.get("outcome") in ("added", "rewritten")]
+    completed = [
+        r for r in results if r.get("outcome") in (ItemOutcome.ADDED, ItemOutcome.REWRITTEN)
+    ]
     if not completed:
         return None
 

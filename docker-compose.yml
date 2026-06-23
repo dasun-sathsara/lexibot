@@ -20,6 +20,12 @@ services:
       - bot-data:/app/data
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - vocabnet
 
@@ -31,6 +37,12 @@ services:
         condition: service_healthy
     volumes:
       - bot-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://anki-headless:8765')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     networks:
       - vocabnet
 
@@ -60,10 +72,16 @@ services:
     volumes:
       - anki-profile:/config
     # AnkiConnect (8765) is reachable only on the internal network, never published.
+    # Port 6080 (VNC) is intentionally not published by default. Expose it temporarily
+    # only for first-time Anki profile setup.
     expose:
       - "8765"
-    ports:
-      - "6080:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8765 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     networks:
       - vocabnet
 
@@ -75,6 +93,12 @@ services:
       - anki-sync-data:/data
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - vocabnet
 

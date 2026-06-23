@@ -105,46 +105,53 @@ class Card(BaseModel):
         cls,
         sense: Sense,
         *,
-        audio: tuple[bytes, bytes, bytes] | None = None,
+        audio: tuple[bytes | None, bytes | None, bytes | None] | None = None,
         gender: str = "female",
     ) -> Card:
         """Assemble a card from a ``Sense`` and (optionally) its three audio clips.
 
-        ``audio`` is ``(word, sentence_1, sentence_2)``. When ``None`` (e.g. TTS failed for
-        every clip) the card is still created with text fields and empty media so the note
-        can be written and the audio retried later (graceful partial failure, PIPE-02/03).
+        ``audio`` is ``(word, sentence_1, sentence_2)``. ``None`` for a clip means that
+        clip failed; the others are still stored so partial TTS progress is preserved.
+        When ``audio`` itself is ``None`` no media is attached.
         """
-        media: tuple[MediaClip, ...] = ()
+        clips: list[MediaClip] = []
         if audio is not None:
             word_audio, ex1_audio, ex2_audio = audio
-            media = (
-                MediaClip(
-                    filename=media_filename(sense.headword, sense.headword, gender=gender),
-                    field=FIELD_WORD_PRON,
-                    audio=word_audio,
-                ),
-                MediaClip(
-                    filename=media_filename(
-                        sense.headword, sense.sentence_1, gender=gender, suffix="ex1"
-                    ),
-                    field=FIELD_SENTENCE_PRON_1,
-                    audio=ex1_audio,
-                ),
-                MediaClip(
-                    filename=media_filename(
-                        sense.headword, sense.sentence_2, gender=gender, suffix="ex2"
-                    ),
-                    field=FIELD_SENTENCE_PRON_2,
-                    audio=ex2_audio,
-                ),
-            )
+            if word_audio is not None:
+                clips.append(
+                    MediaClip(
+                        filename=media_filename(sense.headword, sense.headword, gender=gender),
+                        field=FIELD_WORD_PRON,
+                        audio=word_audio,
+                    )
+                )
+            if ex1_audio is not None:
+                clips.append(
+                    MediaClip(
+                        filename=media_filename(
+                            sense.headword, sense.sentence_1, gender=gender, suffix="ex1"
+                        ),
+                        field=FIELD_SENTENCE_PRON_1,
+                        audio=ex1_audio,
+                    )
+                )
+            if ex2_audio is not None:
+                clips.append(
+                    MediaClip(
+                        filename=media_filename(
+                            sense.headword, sense.sentence_2, gender=gender, suffix="ex2"
+                        ),
+                        field=FIELD_SENTENCE_PRON_2,
+                        audio=ex2_audio,
+                    )
+                )
         return cls(
             word_field=sense.word_field,
             en_meaning=sense.en_meaning,
             si_meaning=sense.si_meaning,
             sentence_1=sense.sentence_1,
             sentence_2=sense.sentence_2,
-            media=media,
+            media=tuple(clips),
         )
 
     @property

@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 
 import structlog
 
+from lexibot.config import Settings
 from lexibot.core.enums import ItemOutcome
 from lexibot.core.exceptions import TTSError
 from lexibot.core.models import Card, Sense
@@ -56,34 +57,36 @@ class PipelineLimits:
     llm_chunks: int = DEFAULT_MAX_LLM_CHUNKS
 
     @classmethod
-    def from_key_count(cls, num_keys: int, *, tts: int = DEFAULT_TTS_CONCURRENCY) -> PipelineLimits:
-        return cls(tts=tts, llm_chunks=min(max(num_keys, 1), DEFAULT_MAX_LLM_CHUNKS))
+    def from_settings(cls, settings: Settings) -> PipelineLimits:
+        return cls(
+            tts=settings.tts_concurrency,
+            llm_chunks=min(max(len(settings.gemini_api_keys), 1), settings.max_llm_chunks),
+        )
 
 
 async def synthesize_clips(
     sense: Sense, tts: Synthesizer, *, tts_sem: asyncio.Semaphore
-) -> tuple[bytes, bytes, bytes] | None:
+) -> tuple[bytes | None, bytes | None, bytes | None]:
     """Generate (word, sentence_1, sentence_2) audio concurrently.
 
-    Returns the three clips on success, or ``None`` if any clip failed (the whole group is
-    cancelled and the failure is logged) so the caller can still build a text-only card.
+    Returns a tuple with the synthesized bytes for each clip. Individual failures are
+    logged and returned as ``None`` so the caller can build a card with whatever audio
+    succeeded instead of discarding partial progress.
     """
 
-    async def _one(text: str, *, slow: bool) -> bytes:
+    async def _one(text: str, *, slow: bool) -> bytes | None:
         async with tts_sem:
-            return await tts.synthesize(text, slow=slow)
+            try:
+                return await tts.synthesize(text, slow=slow)
+            except TTSError:
+                log.warning("tts.clip_failed", word=sense.word_field, text=text)
+                return None
 
-    failed = False
-    try:
-        async with asyncio.TaskGroup() as tg:
-            word = tg.create_task(_one(sense.headword, slow=True))
-            ex1 = tg.create_task(_one(sense.sentence_1, slow=False))
-            ex2 = tg.create_task(_one(sense.sentence_2, slow=False))
-    except* TTSError as eg:
-        log.warning("tts.partial_failure", word=sense.word_field, errors=len(eg.exceptions))
-        failed = True
-    if failed:
-        return None
+    async with asyncio.TaskGroup() as tg:
+        word = tg.create_task(_one(sense.headword, slow=True))
+        ex1 = tg.create_task(_one(sense.sentence_1, slow=False))
+        ex2 = tg.create_task(_one(sense.sentence_2, slow=False))
+
     return (word.result(), ex1.result(), ex2.result())
 
 

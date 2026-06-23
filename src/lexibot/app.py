@@ -11,8 +11,10 @@ from aiogram.types import Update
 from fastapi import FastAPI, Header, Request, Response
 
 from lexibot.bot.dispatcher import build_dispatcher
+from lexibot.bot.task_registry import await_background_tasks
 from lexibot.config import Settings, get_settings
 from lexibot.container import create_redis_pool
+from lexibot.db.engine import create_all, create_engine
 from lexibot.logging import configure_logging
 
 log = structlog.get_logger(__name__)
@@ -27,11 +29,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     bot = Bot(token=settings.telegram_token.get_secret_value())
     arq = await create_redis_pool(settings)
-    dp = build_dispatcher(allowed_ids=settings.allowed_ids, arq=arq)
+    engine = create_engine(settings.database_url)
+    await create_all(engine)
+    dp = build_dispatcher(allowed_ids=settings.allowed_ids, arq=arq, engine=engine)
 
     app.state.bot = bot
     app.state.dp = dp
     app.state.settings = settings
+    app.state.engine = engine
 
     if settings.webhook_base_url:
         secret = settings.webhook_secret.get_secret_value() if settings.webhook_secret else None
@@ -44,8 +49,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await await_background_tasks()
         await bot.session.close()
         await arq.aclose()
+        await engine.dispose()
 
 
 def create_app() -> FastAPI:

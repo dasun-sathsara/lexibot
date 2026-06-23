@@ -13,6 +13,7 @@ from arq.connections import RedisSettings
 
 from lexibot.config import get_settings
 from lexibot.container import build_worker_context, close_worker_context
+from lexibot.db.engine import create_all
 from lexibot.logging import configure_logging
 from lexibot.worker.tasks import process_chunk
 
@@ -21,6 +22,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     ctx.update(await build_worker_context(settings))
+    await create_all(ctx["engine"])
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
@@ -33,8 +35,8 @@ class WorkerSettings:
     functions: ClassVar[list[Any]] = [process_chunk]
     on_startup = startup
     on_shutdown = shutdown
-    max_tries = 5
-    job_timeout = 300
+    max_tries = get_settings().worker_max_tries
+    job_timeout = get_settings().worker_job_timeout_s
 
     try:
         redis_settings = RedisSettings.from_dsn(get_settings().redis_dsn)

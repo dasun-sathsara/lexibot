@@ -26,3 +26,8 @@ class MediaStore:
         """Upload each of the card's clips. A no-op when the card has no media."""
         for clip in card.media:
             await self._client.store_media_file(clip.filename, encode_media(clip.audio))
+
+    async def delete(self, card: Card) -> None:
+        """Delete each of the card's media files. A no-op when the card has no media."""
+        for clip in card.media:
+            await self._client.delete_media_file(clip.filename)

@@ -36,7 +36,9 @@ POS_NAMES = {
 
 def render_card_preview(results: list[dict[str, str]]) -> str:
     """Render a preview of completed cards in the batch."""
-    completed = [r for r in results if r.get("outcome") in ("added", "rewritten")]
+    completed = [
+        r for r in results if r.get("outcome") in (ItemOutcome.ADDED, ItemOutcome.REWRITTEN)
+    ]
     if not completed:
         parts = ["❌ **Batch Processing Failed**", ""]
         for res in results:

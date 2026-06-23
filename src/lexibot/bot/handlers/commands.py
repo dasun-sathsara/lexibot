@@ -5,6 +5,9 @@ from __future__ import annotations
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from lexibot.db.repositories import set_user_model
 
 router = Router(name="commands")
 
@@ -32,11 +35,16 @@ async def help_cmd(message: Message) -> None:
 
 
 @router.message(Command("model"))
-async def model_cmd(message: Message) -> None:
+async def model_cmd(message: Message, engine: AsyncEngine) -> None:
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2 or parts[1].strip().lower() not in {"flash", "pro"}:
         await message.answer("Usage: /model flash|pro")
         return
     choice = parts[1].strip().lower()
     model = "gemini-3.5-flash" if choice == "flash" else "gemini-3.1-pro-preview"
+
+    user = message.from_user
+    if user is not None:
+        await set_user_model(engine, user.id, model)
+
     await message.answer(f"Model set to `{model}` for your next words.")

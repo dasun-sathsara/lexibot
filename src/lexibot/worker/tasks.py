@@ -22,14 +22,16 @@ from lexibot.core.enums import ItemOutcome
 from lexibot.core.exceptions import AnkiUnavailable, LLMError
 from lexibot.core.models import RawItem, Sense
 from lexibot.core.pipeline import Pipeline, WordResult
+from lexibot.db.repositories import add_audit_event, get_user_model, record_processed_item
 from lexibot.llm.ports import LanguageModel
+from lexibot.observability.alerts import AdminAlerter
 
 log = structlog.get_logger(__name__)
 
-_PROGRESS_TTL = 3600
 
-
-async def _update_progress(redis: Any, progress_key: str, headword: str, state: str) -> None:
+async def _update_progress(
+    redis: Any, progress_key: str, headword: str, state: str, ttl_s: int
+) -> None:
     """Read-modify-write one headword's state in the job's progress JSON object.
 
     The bot publishes the initial object (all words ``queued``) before enqueuing, so this
@@ -44,7 +46,36 @@ async def _update_progress(redis: Any, progress_key: str, headword: str, state: 
         except (ValueError, AttributeError):
             progress = {}
     progress[headword] = state
-    await redis.set(progress_key, json.dumps(progress), ex=_PROGRESS_TTL)
+    await redis.set(progress_key, json.dumps(progress), ex=ttl_s)
+
+
+async def _persist_outcome(
+    engine: Any | None,
+    *,
+    job_id: str | None,
+    user_id: int,
+    word_field: str,
+    outcome: str,
+    detail: str = "",
+) -> None:
+    if engine is None or job_id is None:
+        return
+    try:
+        await record_processed_item(
+            engine,
+            job_id=job_id,
+            user_id=user_id,
+            word_field=word_field,
+            outcome=outcome,
+        )
+        await add_audit_event(
+            engine,
+            user_id=user_id,
+            event=f"word:{outcome}",
+            detail=detail or word_field,
+        )
+    except Exception as exc:
+        log.warning("db.audit.failed", error=str(exc))
 
 
 async def _enrich_with_fallback(ctx: dict[str, Any], items: list[RawItem]) -> list[Sense | None]:
@@ -86,11 +117,20 @@ async def process_chunk(
     pipeline callbacks, then ``done``/``rewritten``/``failed`` on completion.
     """
     pipeline: Pipeline = ctx["pipeline"]
+    alerter: AdminAlerter | None = ctx.get("alerter")
     raw = [RawItem(**it) for it in items]
+
+    engine = ctx.get("engine")
+    if engine is not None:
+        user_model = await get_user_model(engine, user_id)
+        if user_model:
+            ctx["llm"].set_model(user_model)
 
     redis = ctx.get("redis")
     jid = ctx.get("job_id")
     progress_key = f"lexibot:progress:{jid}" if (redis and jid) else None
+    settings = ctx.get("settings")
+    progress_ttl_s: int = settings.progress_ttl_s if settings is not None else 3600
 
     # Sync remote Anki collection first to retrieve any changes made on other devices
     try:
@@ -102,7 +142,7 @@ async def process_chunk(
     # the actual batched call rather than per-item serial progress.
     if progress_key:
         for it in raw:
-            await _update_progress(redis, progress_key, it.headword, "llm")
+            await _update_progress(redis, progress_key, it.headword, "llm", progress_ttl_s)
 
     senses = await _enrich_with_fallback(ctx, raw)
 
@@ -111,7 +151,15 @@ async def process_chunk(
         headword = item.headword
         if sense is None:
             if progress_key:
-                await _update_progress(redis, progress_key, headword, "failed")
+                await _update_progress(redis, progress_key, headword, "failed", progress_ttl_s)
+            await _persist_outcome(
+                engine,
+                job_id=jid,
+                user_id=user_id,
+                word_field=headword,
+                outcome=str(ItemOutcome.SKIPPED),
+                detail="LLM enrichment failed",
+            )
             results.append(
                 {
                     "word": headword,
@@ -124,14 +172,24 @@ async def process_chunk(
         # Bind the headword into the callback so the loop variable isn't captured late.
         async def on_state_change(state: str, _hw: str = headword) -> None:
             if progress_key:
-                await _update_progress(redis, progress_key, _hw, state)
+                await _update_progress(redis, progress_key, _hw, state, progress_ttl_s)
 
         try:
             res = await pipeline.process(sense, on_state_change=on_state_change)
             final_state = "done" if res.outcome == ItemOutcome.ADDED else "rewritten"
             if progress_key:
-                await _update_progress(redis, progress_key, sense.headword, final_state)
+                await _update_progress(
+                    redis, progress_key, sense.headword, final_state, progress_ttl_s
+                )
 
+            await _persist_outcome(
+                engine,
+                job_id=jid,
+                user_id=user_id,
+                word_field=res.word_field,
+                outcome=str(res.outcome),
+                detail=f"audio_failed={res.audio_failed}",
+            )
             results.append(
                 {
                     "word": res.word_field,
@@ -147,12 +205,26 @@ async def process_chunk(
         except AnkiUnavailable:
             log.warning("anki.unavailable.requeue", word=sense.word_field)
             if progress_key:
-                await _update_progress(redis, progress_key, sense.headword, "failed")
+                await _update_progress(
+                    redis, progress_key, sense.headword, "failed", progress_ttl_s
+                )
+            if alerter is not None:
+                await alerter.alert(f"Anki unavailable; job {jid} will be retried.")
             raise
         except Exception as e:
             log.error("word.processing.failed", word=sense.word_field, error=str(e))
             if progress_key:
-                await _update_progress(redis, progress_key, sense.headword, f"failed: {e}")
+                await _update_progress(
+                    redis, progress_key, sense.headword, f"failed: {e}", progress_ttl_s
+                )
+            await _persist_outcome(
+                engine,
+                job_id=jid,
+                user_id=user_id,
+                word_field=sense.word_field,
+                outcome=str(ItemOutcome.SKIPPED),
+                detail=str(e),
+            )
             results.append(
                 {
                     "word": sense.word_field,

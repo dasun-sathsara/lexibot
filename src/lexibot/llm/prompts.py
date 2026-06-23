@@ -9,6 +9,8 @@ SYSTEM_INSTRUCTION = (
     "learner (CEFR A2-B1). For each input item produce: the normalized English headword "
     "(silently correcting typos to the intended word), its part of speech, an English "
     "meaning, a Sinhala meaning, and two natural example sentences at A2-B1 difficulty. "
+    "Normalize the headword to title case (e.g. 'run' -> 'Run', 'BREAK the ice' -> "
+    "'Break the ice'). "
     "If an item is not a real English word or phrase, set is_valid_word to false and leave "
     "the other text fields empty. When a sense hint is given, target that exact sense and "
     "let the part of speech follow that sense. Return one result per input item, in order."

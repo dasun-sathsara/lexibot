@@ -3,10 +3,50 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import col
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from lexibot.db.engine import session_scope
 from lexibot.db.tables import AuditLog, ProcessedItem, UserSettings
+
+
+async def get_user_model(engine: AsyncEngine, user_id: int) -> str | None:
+    """Return the user's preferred Gemini model, if any."""
+    async with session_scope(engine) as session:
+        repo = UserSettingsRepository(session)
+        row = await repo.get(user_id)
+        return row.gemini_model if row else None
+
+
+async def set_user_model(engine: AsyncEngine, user_id: int, model: str) -> None:
+    """Persist the user's preferred Gemini model."""
+    async with session_scope(engine) as session:
+        repo = UserSettingsRepository(session)
+        await repo.upsert(user_id, gemini_model=model)
+
+
+async def record_processed_item(
+    engine: AsyncEngine,
+    *,
+    job_id: str,
+    user_id: int,
+    word_field: str,
+    outcome: str,
+) -> None:
+    """Upsert the last-known outcome for a processed item."""
+    async with session_scope(engine) as session:
+        repo = ProcessedItemRepository(session)
+        await repo.record(job_id=job_id, user_id=user_id, word_field=word_field, outcome=outcome)
+
+
+async def add_audit_event(
+    engine: AsyncEngine, *, user_id: int, event: str, detail: str = ""
+) -> None:
+    """Append an audit log entry."""
+    async with session_scope(engine) as session:
+        repo = AuditRepository(session)
+        await repo.add(user_id=user_id, event=event, detail=detail)
 
 
 class ProcessedItemRepository:

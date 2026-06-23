@@ -17,14 +17,14 @@ from arq.jobs import Job
 from lexibot.anki.connect import AnkiConnect, build_find_query
 from lexibot.bot.keyboards import CB_ADD, CB_DISCARD, CB_FIX, CB_REGEN, completed_keyboard
 from lexibot.bot.rendering import render_card_preview, safe_markdown
+from lexibot.bot.task_registry import spawn_task
 from lexibot.config import get_settings
+from lexibot.core.enums import ItemOutcome
 from lexibot.core.models import FIELD_SI_MEANING
 
 log = structlog.get_logger(__name__)
 
 router = Router(name="callbacks")
-
-_background_tasks: set[asyncio.Task[None]] = set()
 
 
 @router.callback_query(F.data.startswith(f"{CB_ADD}:"))
@@ -243,7 +243,7 @@ async def _monitor_regen(
         updated = False
         if job_res:
             for r in job_res:
-                if r.get("outcome") in ("added", "rewritten"):
+                if r.get("outcome") in (ItemOutcome.ADDED, ItemOutcome.REWRITTEN):
                     for idx, item in enumerate(results):
                         if item.get("word") == word_field:
                             results[idx] = r
@@ -302,8 +302,4 @@ async def on_regen_examples(query: CallbackQuery, arq: ArqRedis, bot: Bot) -> No
     if job is None:
         job = Job(jid, arq)
 
-    task = asyncio.create_task(
-        _monitor_regen(query.message, job, word_field, query.message.message_id, arq, bot)
-    )
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    spawn_task(_monitor_regen(query.message, job, word_field, query.message.message_id, arq, bot))

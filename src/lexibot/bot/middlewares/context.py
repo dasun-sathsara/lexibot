@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import uuid4
 
 import structlog
 from aiogram import BaseMiddleware
@@ -18,6 +19,7 @@ class LoggingContextMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=str(uuid4()))
         user = data.get("event_from_user")
         if user is not None:
             structlog.contextvars.bind_contextvars(user_id=user.id)

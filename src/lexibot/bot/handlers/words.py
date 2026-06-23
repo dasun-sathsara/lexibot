@@ -18,10 +18,11 @@ from arq.jobs import Job
 
 from lexibot.bot.keyboards import completed_keyboard
 from lexibot.bot.rendering import render_card_preview, render_summary, safe_markdown
+from lexibot.bot.task_registry import spawn_task
+from lexibot.config import get_settings
 from lexibot.core.enums import ItemOutcome
 from lexibot.core.parsing import parse_message
 from lexibot.worker.enqueue import (
-    DEFAULT_CHUNK_SIZE,
     apply_soft_cap,
     chunk_items,
     dedupe_items,
@@ -31,8 +32,6 @@ from lexibot.worker.enqueue import (
 log = structlog.get_logger(__name__)
 
 router = Router(name="words")
-
-_background_tasks: set[asyncio.Task[None]] = set()
 
 
 async def _monitor_jobs(
@@ -155,9 +154,13 @@ async def _monitor_jobs(
         summary_items = []
         for r in results:
             w = r.get("word") or r.get("headword") or "unknown"
-            raw_outcome = r.get("outcome", "skipped")
+            raw_outcome = r.get("outcome", ItemOutcome.SKIPPED)
             try:
-                outcome = ItemOutcome(raw_outcome)
+                outcome = (
+                    raw_outcome
+                    if isinstance(raw_outcome, ItemOutcome)
+                    else ItemOutcome(raw_outcome)
+                )
             except ValueError:
                 outcome = ItemOutcome.SKIPPED
             summary_items.append((w, outcome))
@@ -189,8 +192,9 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
         await message.answer("Send me a word or a list of words.")
         return
 
+    settings = get_settings()
     items = dedupe_items(items, user_id=user.id)
-    kept, dropped = apply_soft_cap(items)
+    kept, dropped = apply_soft_cap(items, cap=settings.soft_cap)
 
     note = ""
     if dropped:
@@ -200,7 +204,7 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
 
     jobs: list[Job] = []
     word_keys: list[str] = []
-    for chunk in chunk_items(kept, size=DEFAULT_CHUNK_SIZE):
+    for chunk in chunk_items(kept, size=settings.chunk_size):
         jid = job_id(user.id, "+".join(i.headword for i in chunk))
 
         initial_progress = {item.headword.strip().casefold(): "queue" for item in chunk}
@@ -219,6 +223,4 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
         for item in chunk:
             word_keys.append(item.headword)
 
-    task = asyncio.create_task(_monitor_jobs(status, jobs, word_keys, arq, bot))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    spawn_task(_monitor_jobs(status, jobs, word_keys, arq, bot))

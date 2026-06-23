@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 from tenacity import (
-    retry,
+    AsyncRetrying,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -24,10 +24,10 @@ from lexibot.core.exceptions import AnkiError, AnkiUnavailable
 
 ANKICONNECT_VERSION = 6
 
-# Retry policy for transient AnkiConnect failures (RETRY-03/05): bounded attempts +
+# Default retry policy for transient AnkiConnect failures (RETRY-03/05): bounded attempts +
 # capped exponential backoff. Connection refused -> AnkiUnavailable, which is NOT retried
 # here (the worker handles offline re-queueing instead).
-_MAX_ATTEMPTS = 4
+_DEFAULT_MAX_ATTEMPTS = 4
 
 
 def escape_query_term(term: str) -> str:
@@ -58,30 +58,39 @@ class AnkiConnectError(AnkiError):
 class AnkiConnect:
     """Concrete :class:`~lexibot.anki.ports.AnkiConnectClient` over httpx."""
 
-    def __init__(self, base_url: str, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self, base_url: str, client: httpx.AsyncClient, *, max_attempts: int = _DEFAULT_MAX_ATTEMPTS
+    ) -> None:
         self._url = base_url
         self._client = client
+        self._max_attempts = max_attempts
 
-    @retry(
-        retry=retry_if_exception_type(AnkiConnectError),
-        stop=stop_after_attempt(_MAX_ATTEMPTS),
-        wait=wait_exponential(multiplier=0.5, max=8),
-        reraise=True,
-    )
     async def _invoke(self, action: str, **params: Any) -> Any:
         payload = {"action": action, "version": ANKICONNECT_VERSION, "params": params}
-        try:
-            response = await self._client.post(self._url, json=payload)
-            response.raise_for_status()
-        except httpx.ConnectError as exc:
-            raise AnkiUnavailable(f"AnkiConnect unreachable at {self._url}") from exc
-        except httpx.HTTPStatusError as exc:
-            # 5xx is transient and worth retrying; treat as AnkiConnectError.
-            raise AnkiConnectError(f"AnkiConnect HTTP {exc.response.status_code}") from exc
-        data = response.json()
-        if data.get("error") is not None:
-            raise AnkiConnectError(str(data["error"]))
-        return data.get("result")
+
+        async def _once() -> Any:
+            try:
+                response = await self._client.post(self._url, json=payload)
+                response.raise_for_status()
+            except httpx.ConnectError as exc:
+                raise AnkiUnavailable(f"AnkiConnect unreachable at {self._url}") from exc
+            except httpx.HTTPStatusError as exc:
+                # 5xx is transient and worth retrying; treat as AnkiConnectError.
+                raise AnkiConnectError(f"AnkiConnect HTTP {exc.response.status_code}") from exc
+            data = response.json()
+            if data.get("error") is not None:
+                raise AnkiConnectError(str(data["error"]))
+            return data.get("result")
+
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(AnkiConnectError),
+            stop=stop_after_attempt(self._max_attempts),
+            wait=wait_exponential(multiplier=0.5, max=8),
+            reraise=True,
+        ):
+            with attempt:
+                return await _once()
+        raise AnkiConnectError("AnkiConnect retry exhausted")  # pragma: no cover
 
     async def find_notes(self, query: str) -> list[int]:
         result = await self._invoke("findNotes", query=query)
@@ -114,6 +123,9 @@ class AnkiConnect:
 
     async def store_media_file(self, filename: str, data_b64: str) -> None:
         await self._invoke("storeMediaFile", filename=filename, data=data_b64)
+
+    async def delete_media_file(self, filename: str) -> None:
+        await self._invoke("deleteMediaFile", filename=filename)
 
     async def delete_notes(self, note_ids: list[int]) -> None:
         await self._invoke("deleteNotes", notes=note_ids)

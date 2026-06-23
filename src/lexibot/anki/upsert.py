@@ -6,6 +6,7 @@ note in place and replace its media; otherwise we add a new note with ``allowDup
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -47,22 +48,31 @@ class AnkiUpsertGateway:
     async def upsert(self, card: Card) -> ItemOutcome:
         query = build_find_query(self._note_type, card.word_field)
         note_ids = await self._client.find_notes(query)
+        tags = self._tags()
+
+        # Always store media first. If a subsequent note operation fails we are left with
+        # orphaned media rather than a note pointing at missing files.
+        await self._media.store(card)
+
         if note_ids:
             note_id = note_ids[0]
             await self._client.update_note_fields(note_id, card.fields)
-            await self._client.update_note_tags(note_id, self._tags())
-            await self._media.store(card)
+            await self._client.update_note_tags(note_id, tags)
             return ItemOutcome.REWRITTEN
 
-        # Store media first so the [sound:...] references resolve once the note exists.
-        await self._media.store(card)
-        await self._client.add_note(
-            deck=self._deck,
-            note_type=self._note_type,
-            fields=card.fields,
-            tags=self._tags(),
-            allow_duplicate=True,
-        )
+        try:
+            await self._client.add_note(
+                deck=self._deck,
+                note_type=self._note_type,
+                fields=card.fields,
+                tags=tags,
+                allow_duplicate=True,
+            )
+        except Exception:
+            # Best-effort cleanup so failed adds do not leave orphaned media behind.
+            with contextlib.suppress(Exception):
+                await self._media.delete(card)
+            raise
         return ItemOutcome.ADDED
 
     async def sync(self) -> None:

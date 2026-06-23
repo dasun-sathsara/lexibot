@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel import SQLModel
-from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 def create_engine(database_url: str) -> AsyncEngine:
@@ -22,7 +22,7 @@ async def create_all(engine: AsyncEngine) -> None:
 
 @asynccontextmanager
 async def session_scope(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
-    session = SQLModelAsyncSession(engine, expire_on_commit=False)
+    session = AsyncSession(engine, expire_on_commit=False)
     try:
         yield session
         await session.commit()

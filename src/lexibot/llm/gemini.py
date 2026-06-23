@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from lexibot.llm.keypool import GeminiKeyPool
 
 _HTTP_TOO_MANY_REQUESTS = 429
-_MAX_ATTEMPTS = 4
 
 
 class _RateLimited(Exception):
@@ -44,8 +43,13 @@ class _RateLimited(Exception):
 class GeminiLanguageModel:
     """Concrete ``LanguageModel`` backed by google-genai + a key pool."""
 
-    def __init__(self, key_pool: GeminiKeyPool, *, model: str) -> None:
+    def __init__(self, key_pool: GeminiKeyPool, *, model: str, max_attempts: int = 4) -> None:
         self._pool = key_pool
+        self._model = model
+        self._max_attempts = max_attempts
+
+    def set_model(self, model: str) -> None:
+        """Switch the model at runtime (e.g., per-user preference)."""
         self._model = model
 
     async def enrich(self, items: list[RawItem], *, sense_hint: str | None = None) -> list[Sense]:
@@ -59,7 +63,7 @@ class GeminiLanguageModel:
     async def _generate_with_retry(self, prompt: str) -> ChunkResponse:
         retrying = AsyncRetrying(
             retry=retry_if_exception_type(_RateLimited),
-            stop=stop_after_attempt(_MAX_ATTEMPTS),
+            stop=stop_after_attempt(self._max_attempts),
             wait=wait_exponential(multiplier=0.5, max=8),
             reraise=False,
         )

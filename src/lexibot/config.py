@@ -42,6 +42,19 @@ class Settings(BaseSettings):
     redis_dsn: str = "redis://redis:6379/0"
     database_url: str = "sqlite+aiosqlite:///data/vocab.db"
 
+    # Chunking / pipeline limits
+    chunk_size: int = 10
+    soft_cap: int = 50
+    tts_concurrency: int = 4
+    max_llm_chunks: int = 3
+
+    # Retries / timeouts
+    gemini_max_attempts: int = 4
+    ankiconnect_max_attempts: int = 4
+    progress_ttl_s: int = 3600
+    worker_max_tries: int = 5
+    worker_job_timeout_s: int = 300
+
     # Observability / misc
     tz: str = "Asia/Colombo"
     log_level: str = "INFO"
