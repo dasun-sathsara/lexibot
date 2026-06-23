@@ -54,6 +54,9 @@ services:
     restart: unless-stopped
     environment:
       - SYNC_SERVER=http://anki-sync-server:8080
+      - ANKI_SYNC_SERVER=http://anki-sync-server:8080
+      - ANKI_SYNC_USER=${ANKI_SYNC_USER}
+      - ANKI_SYNC_PASS=${ANKI_SYNC_PASS}
     volumes:
       - anki-profile:/config
     # AnkiConnect (8765) is reachable only on the internal network, never published.

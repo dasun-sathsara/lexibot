@@ -92,6 +92,12 @@ async def process_chunk(
     jid = ctx.get("job_id")
     progress_key = f"lexibot:progress:{jid}" if (redis and jid) else None
 
+    # Sync remote Anki collection first to retrieve any changes made on other devices
+    try:
+        await ctx["anki"].sync()
+    except Exception as e:
+        log.error("anki.sync_before.failed", error=str(e))
+
     # Mark every word as in-LLM before the (shared) enrichment call so the stepper reflects
     # the actual batched call rather than per-item serial progress.
     if progress_key:

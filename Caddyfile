@@ -12,6 +12,9 @@
 		reverse_proxy bot:8080
 	}
 
+	handle /sync/* {
+		reverse_proxy anki-sync-server:8080
+	}
 	handle {
 		respond 404
 	}
