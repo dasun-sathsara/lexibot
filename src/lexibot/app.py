@@ -79,3 +79,5 @@ def create_app() -> FastAPI:
         update = Update.model_validate(await request.json(), context={"bot": bot})
         await dp.feed_update(bot, update)
         return Response(status_code=200)
+
+    return app

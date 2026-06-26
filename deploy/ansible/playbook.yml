@@ -43,11 +43,6 @@
         state: started
         enabled: true
 
-    - name: Clone the repository
-      ansible.builtin.git:
-        repo: "{{ repo_url }}"
-        dest: "{{ app_dir }}"
-        version: master
 
     - name: Lock down .env permissions if present
       ansible.builtin.file:

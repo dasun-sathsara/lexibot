@@ -20,20 +20,24 @@ This guide outlines the step-by-step process for deploying the **lexibot** appli
   * AnkiConnect (8765) is bound to the Docker internal network only and is **never published** to the host. Port 5900 (VNC) is only relevant for debugging (see §4).
 ---
 
-## 2. Server Provisioning
-The project includes an Ansible playbook to automate server setup (Docker Engine + Docker Compose plugin).
+## 2. Automated Local Deployment
+Instead of manual setup or GitHub CI pipelines (which have been removed), you can build and deploy the stack directly from your local machine to the VPS using the `deploy.sh` script in the root directory:
 
-1. Install Ansible on your local machine (or on the VPS itself).
-2. Run the playbook to provision the VPS and clone the repository to `/opt/lexibot`:
-   ```bash
-   sudo ansible-playbook -i localhost, -c local deploy/ansible/playbook.yml
-   ```
-3. Verify that Docker and Compose are fully operational on the VPS:
-   ```bash
-   docker --version
-   docker compose version
-   ```
+```bash
+./deploy.sh azureuser@<your-vps-ip>
+```
 
+If `DOMAIN` is configured in your local `.env`, the script will automatically resolve the target IP and run:
+```bash
+./deploy.sh
+```
+
+This deployment script automates:
+1. Preparing the remote `/opt/lexibot` directory.
+2. Syncing the local workspace (code, configurations, and pre-configured profiles) via `rsync`.
+3. Running `deploy/bootstrap.sh` on the VPS to set up a 2 GiB swap space and provision Docker/Docker Compose via Ansible.
+4. Building the Docker images and launching the compose stack.
+5. Waiting for container health checks to pass.
 ---
 
 ## 3. Environment & Secrets Configuration
@@ -52,7 +56,7 @@ Create and fill the `/opt/lexibot/.env` file on the VPS:
    * `VB_GEMINI_API_KEYS`: Your Gemini API Key (from Google AI Studio, comma-separated if multiple).
    * `VB_AZURE_SPEECH_KEY`: Your Azure Speech / AI Services key.
    * `VB_AZURE_SPEECH_ENDPOINT`: The Azure region code (e.g. `eastus2`). *Note: For multi-service Cognitive Services keys, this must be the region name (e.g. `eastus2`) instead of the endpoint URL to prevent 401 WebSocket errors.*
-   * `VB_DATABASE_URL`: Set to `sqlite+aiosqlite:///app/data/vocab.db` (enables database persistence in the mounted `bot-data` volume).
+   * `VB_DATABASE_URL`: Set to `sqlite+aiosqlite:////app/data/vocab.db` (enables database persistence in the mounted `bot-data` volume). Note the four slashes (`:////`) required for an absolute path.
    * `VB_WEBHOOK_SECRET`: A secure random hex string for securing the webhook endpoint (e.g. generated via `openssl rand -hex 16`).
 
    There are **no sync credentials in `.env`**: the headless Anki profile syncs to AnkiWeb using credentials stored inside the copied profile, not via environment variables.
@@ -91,8 +95,8 @@ The image is built via the existing GHCR pipeline (`deploy.yml`) with version-pi
      ```
    * Verify AnkiConnect is reachable on the internal network:
      ```bash
-     sudo docker exec lexibot-anki-headless-1 ss -tuln | grep 8765
-     # Expected output: tcp LISTEN 0 5 0.0.0.0:8765 ...
+     sudo docker exec lexibot-bot-1 python -c "import socket; s = socket.socket(); s.connect(('anki-headless', 8765)); print('Connected!')"
+     # Expected output: Connected!
      ```
 
 3. **Debugging aside (optional)**: if you ever need a real GUI surface (e.g. to fix a stuck profile), set `QT_QPA_PLATFORM=vnc` in the `anki-headless` service environment and uncomment the `# ports: ["5900:5900"]` block in `docker-compose.yml`. That exposes a debug VNC surface on port 5900 — **not** for normal operation. In normal operation the container stays headless with no published ports.
@@ -118,3 +122,16 @@ The self-hosted sync server was removed: the headless Anki profile syncs to **An
 1. **Server URL**: leave the sync server at the default AnkiWeb URL (`https://sync.ankiweb.net`). Do **not** point your device at the bot's domain — there is no public sync endpoint.
 2. **Credentials**: log in with your AnkiWeb account (the same one the headless profile is authenticated to).
 3. **Trigger Sync**: click **Sync** on your personal device. AnkiWeb mediates between your device and the headless profile; cards added by the Telegram bot appear after the headless profile's debounced sync runs.
+
+---
+
+## 7. Troubleshooting & Hard Lessons Learned
+
+### Container Healthchecks and Missing Tools
+If `anki-headless` is reported as `unhealthy` by `docker compose ps` even though AnkiConnect is active, check the healthcheck command defined in `docker-compose.yml`:
+* The minimal Debian-slim image used for `anki-headless` does not have `nc` (netcat) installed.
+* Standard `nc -z localhost 8765` healthcheck commands will fail with command-not-found (exit code 127).
+* **Fix**: Use bash's built-in socket check in the container healthcheck configuration:
+  ```yaml
+  test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8765"]
+  ```
