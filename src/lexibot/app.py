@@ -13,8 +13,8 @@ from fastapi import FastAPI, Header, Request, Response
 from lexibot.bot.dispatcher import build_dispatcher
 from lexibot.bot.task_registry import await_background_tasks
 from lexibot.config import Settings, get_settings
-from lexibot.container import create_redis_pool
-from lexibot.db.engine import create_all, create_engine
+from lexibot.container import build_runner, close_runner_resources
+from lexibot.db.engine import create_all
 from lexibot.logging import configure_logging
 
 log = structlog.get_logger(__name__)
@@ -24,19 +24,20 @@ WEBHOOK_PATH = "/webhook"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """FastAPI lifespan: wire logging, bot, dispatcher, DB engine, webhook, and shutdown cleanup."""
     settings: Settings = get_settings()
     configure_logging(settings.log_level)
 
     bot = Bot(token=settings.telegram_token.get_secret_value())
-    arq = await create_redis_pool(settings)
-    engine = create_engine(settings.database_url)
+    runner, http, engine = build_runner(settings)
     await create_all(engine)
-    dp = build_dispatcher(allowed_ids=settings.allowed_ids, arq=arq, engine=engine)
+    dp = build_dispatcher(allowed_ids=settings.allowed_ids, runner=runner, engine=engine)
 
     app.state.bot = bot
     app.state.dp = dp
     app.state.settings = settings
     app.state.engine = engine
+    app.state.runner = runner
 
     if settings.webhook_base_url:
         secret = settings.webhook_secret.get_secret_value() if settings.webhook_secret else None
@@ -51,11 +52,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         await await_background_tasks()
         await bot.session.close()
-        await arq.aclose()
-        await engine.dispose()
+        await close_runner_resources(http=http, engine=engine, runner=runner)
 
 
 def create_app() -> FastAPI:
+    """Create the FastAPI app with /healthz and /webhook routes."""
     app = FastAPI(lifespan=lifespan)
 
     @app.get("/healthz")
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
         request: Request,
         x_telegram_bot_api_secret_token: str | None = Header(default=None),
     ) -> Response:
+        """Validate secret token, parse update, and feed to dispatcher."""
         settings: Settings = request.app.state.settings
         if settings.webhook_secret is not None:
             expected = settings.webhook_secret.get_secret_value()
@@ -77,5 +79,3 @@ def create_app() -> FastAPI:
         update = Update.model_validate(await request.json(), context={"bot": bot})
         await dp.feed_update(bot, update)
         return Response(status_code=200)
-
-    return app

@@ -14,7 +14,7 @@ Companion to the Preliminary Plan. This document is the **technical architecture
 | Layout        | **`src/` layout**                            | Prevents accidental imports of the un-installed package; enforces editable installs in tests.                         |
 | Lint/format   | **`ruff`**                                   | Replaces flake8/isort/black; one tool.                                                                                |
 | Types         | **`mypy --strict`** • `pydantic.mypy` plugin | Fully typed; Protocols for all external adapters.                                                                     |
-| Runtime model | **async-first**                              | `aiogram` 3.x, `httpx.AsyncClient`, `aiosqlite`, ARQ.                                                                 |
+| Runtime model | **async-first**                              | `aiogram` 3.x, `httpx.AsyncClient`, `aiosqlite`; in-process pipeline runner (no broker).                                                                 |
 | Tests         | **`pytest` • `pytest-asyncio` • `respx`**    | Adapters mocked at the HTTP boundary.                                                                                 |
 
 ## 2. Repository structure
@@ -28,7 +28,7 @@ lexibot/
 ├── .env.example
 ├── .gitignore
 ├── Dockerfile                # multi-stage, uv-based
-├── docker-compose.yml        # bot, worker, redis, anki-headless, anki-sync-server, caddy
+├── docker-compose.yml        # bot, anki-headless, caddy
 ├── Caddyfile
 ├── .github/workflows/
 │   ├── ci.yml                # ruff + mypy + pytest on PR/push
@@ -59,7 +59,8 @@ lexibot/
 │   │   ├── models.py         # pydantic domain models (Sense, Card, RawItem)
 │   │   ├── exceptions.py     # typed error hierarchy
 │   │   ├── parsing.py        # split message → candidate items
-│   │   └── pipeline.py       # per-word orchestration (LLM → TTS → Anki)
+│   │   ├── pipeline.py       # per-word orchestration (LLM → TTS → Anki)
+│   │   └── runner.py         # in-process pipeline runner + in-memory state
 │   ├── llm/
 │   │   ├── ports.py          # LanguageModel Protocol
 │   │   ├── gemini.py         # google-genai impl
@@ -76,9 +77,7 @@ lexibot/
 │   │   ├── upsert.py         # find → update | add (allowDuplicate)
 │   │   └── media.py          # tgb_<word>_<hash> naming + storeMediaFile
 │   ├── worker/
-│   │   ├── settings.py       # ARQ WorkerSettings
-│   │   ├── tasks.py          # process_chunk / process_word
-│   │   └── enqueue.py        # job-id idempotency helpers
+│   │   └── enqueue.py        # job-id idempotency + chunking helpers
 │   ├── db/
 │   │   ├── engine.py         # async engine + session factory
 │   │   ├── tables.py         # SQLModel tables
@@ -95,7 +94,7 @@ lexibot/
 
 - **Ports & adapters (hexagonal).** `core/pipeline.py` depends only on `*/ports.py` Protocols, never on `google-genai`, the Azure SDK, or AnkiConnect directly. Swapping the TTS provider or model is a one-file change and trivially mockable in tests.
 - **`container.py` as composition root.** All concrete adapters are constructed once at startup and injected; no global singletons reaching into SDKs.
-- **Bot vs worker separation.** The aiogram/FastAPI process only validates, enqueues, and renders replies. All slow work (LLM, TTS, Anki writes) runs in the ARQ worker so the webhook returns immediately.
+- **Single process.** The aiogram/FastAPI process also runs the pipeline: handlers schedule chunk work on the in-process `core/runner.py` runner and return immediately, so the webhook stays non-blocking without a separate worker process or broker.
 
 ## 3. Runtime topology
 
@@ -103,44 +102,41 @@ lexibot/
       Telegram
          │  HTTPS webhook
          ▼
-┌──────────────────┐   enqueue (ARQ)   ┌──────────────────┐
-│  bot (FastAPI +  │ ────────────────▶ │   redis (broker  │
-│  aiogram)        │                   │   + job state)   │
-│  auth, parse,    │ ◀──── progress ── │                  │
-│  render replies  │                   └────────┬─────────┘
-└──────────────────┘                            │ dequeue
-         ▲                                       ▼
-         │ edit message               ┌──────────────────┐
-         │  (live counter)            │  worker (ARQ)    │
-         └────────────────────────────│  pipeline:       │
-                                      │  LLM→TTS→Anki    │
-                                      └───┬─────┬─────┬──┘
-                       google-genai ◀─────┘     │     └────▶ AnkiConnect
-                       (key pool)               │            (anki-headless :8765)
-                         MAI-Voice-2 ◀───────────┘                  │ debounced sync
-                         (Azure Speech)                            ▼
-                                                           anki-sync-server ──▶ phone
+┌────────────────────────────────────────────┐
+│  bot (FastAPI + aiogram)                    │
+│  auth, parse, render replies                │
+│  ┌────────────────────────────────────────┐ │
+│  │ core/runner.py  (in-process runner)    │ │
+│  │  • asyncio.Semaphore(pipeline_concurrency)
+│  │  • per-chunk LLM call → per-word fan-out│ │
+│  │  • in-memory BatchProgress + StateStore │ │
+│  └─────────┬──────┬─────┬──────────────────┘ │
+└────────────│──────│─────│──────────────────┘
+             │      │     │
+   google-genai│     │     └────▶ AnkiConnect (anki-headless :8765)
+   (key pool)  │     │                  │ debounced sync
+   MAI-Voice-2 ◀─────┘                  ▼
+   (Azure Speech)               AnkiWeb ◀────▶ phone
 ```
 
-All services run on the single Ubuntu LTS VPS via Docker Compose; **Caddy** terminates TLS and proxies the webhook. `anki-headless` and `anki-sync-server` hold persistent volumes; everything else is stateless and replaceable.
+All services run on the single Ubuntu LTS VPS via Docker Compose; **Caddy** terminates TLS and proxies the webhook. The `bot` container holds the SQLite data volume; `anki-headless` holds the copied Anki profile in its `/data` volume. There is no Redis, no separate worker process, and no self-hosted sync server — AnkiWeb is the sync target.
 
 ### 3.1 Service & Ingress Details
 
 - **Caddy Ingress:** Caddy routes external traffic to the FastAPI webhook application. The `Caddyfile` uses explicit `handle` blocks to map `/webhook` and `/healthz` to the bot service, returning a `404` for any unhandled routes. Caddy reads the public `DOMAIN` variable via environment substitution, which Docker Compose passes using `env_file: .env`.
-- **Anki Headless:** The `anki-headless` service uses the `mlcivilengineer/anki-desktop-docker:main` image. It connects to the sync server via the `SYNC_SERVER` environment variable.
-- **Anki Sync Server:** To authenticate local or remote devices (like a mobile client), the `anki-sync-server` service requires a `SYNC_USER1` environment variable (e.g. `SYNC_USER1=anki:password`) supplied via the `.env` file.
+- **Anki Headless:** The `anki-headless` service is built from the vendored copy of `ThisIsntTheWay/headless-anki` under `deploy/anki-headless/` and runs in `QT_QPA_PLATFORM=offscreen` mode (no VNC/noVNC desktop stack). Its `/data` volume holds an Anki profile that was pre-authenticated to AnkiWeb out-of-band and copied in; AnkiConnect is configured with `webBindAddress: 0.0.0.0` and `webCorsOriginList: ["*"]` so the bot can reach it on the internal network. There is no self-hosted sync server, no `SYNC_USER1`, and no public `/sync/*` ingress — personal devices sync to AnkiWeb normally.
 
 ## 4. Request lifecycle
 
 1. **Ingress** — Telegram → Caddy → FastAPI webhook → aiogram dispatcher.
 2. **Auth middleware** — drop anything whose sender id ∉ `ALLOWED_IDS` (silent).
 3. **Parse** — `core/parsing.py` light-splits the message into candidate items (newlines/commas); no strict delimiter.
-4. **Enqueue** — items are batched into 10-word chunks; each enqueued with a deterministic job id (`w:<user>:<pos?>:<raw>`), so rapid resends coalesce. The bot immediately posts a status message.
-5. **Worker** — `process_chunk` runs one structured LLM call → fans out per-item `process_word`:
+4. **Dispatch** — items are batched into 10-word chunks; each handed to `core/runner.py` via `PipelineRunner.submit_chunk` with a deterministic job id (`w:<user>:<normalized_headwords>`), so rapid resends coalesce (the runner returns the existing in-flight handle). The bot immediately posts a status message and returns, leaving the chunk to run in the background.
+5. **Runner** — the in-process runner runs one structured LLM call per chunk → fans out per-word `pipeline.process`:
    - generate the three audio clips concurrently (`TaskGroup`),
    - store media, upsert the note,
-   - update the shared progress counter.
-6. **Sync** — after the chunk drains (and on idle), the worker calls AnkiConnect `sync` once (debounced).
+   - mirror per-word state into the in-memory `BatchProgress` (the bot reads it directly to edit the live stepper).
+6. **Sync** — after the chunk drains, the runner calls AnkiConnect `sync` once (debounced). The headless profile syncs the result to AnkiWeb.
 7. **Reply** — the bot edits the original message into a native checklist: ✅ added / ♻️ rewritten / ⏭️ skipped.
 
 ## 5. Configuration (`config.py`)
@@ -182,7 +178,6 @@ class Settings(BaseSettings):
     note_type: str = "Eng Vocab 2 Examples"
 
     # Infra
-    redis_dsn: str = "redis://redis:6379/0"
     database_url: str = "sqlite+aiosqlite:///data/vocab.db"
 
     # Observability / misc
@@ -365,29 +360,34 @@ class AnkiUpsertGateway:
         return ItemOutcome.ADDED
 
 ```
-### 7.4 Worker settings (`worker/settings.py`)
+### 7.4 In-process runner (`core/runner.py`)
 
-The ARQ worker is configured to read the Redis connection URL from the app settings. To prevent potential startup crashes (e.g., if configuration fails or during test initialization where a mock environment may be used), `WorkerSettings` loads Redis settings defensively using a safe class attribute with a try-except fallback.
+The `PipelineRunner` is constructed once in the FastAPI lifespan (`container.build_runner`) and injected into the dispatcher workflow data as `runner`. Handlers call `runner.submit_chunk(user_id=..., items=chunk)` which schedules the chunk as an `asyncio.create_task` bounded by `asyncio.Semaphore(settings.pipeline_concurrency)`. The runner coalesces rapid duplicate submissions by keying its in-flight batch registry off the deterministic `job_id(...)` from `worker/enqueue.py` and returning the existing `BatchProgress` handle when a chunk with the same id is still running. Per-batch progress (the headword→step map) and the small transient state surfaces the bot needs (edit-session keys, batch-results snapshots) live on the in-memory `StateStore`; durable idempotency outcomes and audit events still flow through SQLite via `db/repositories.py`. The runner drains in-flight tasks on shutdown (`runner.drain`).
 
 ```python
-from typing import Any, ClassVar
-from arq.connections import RedisSettings
-from lexibot.config import get_settings
-from lexibot.worker.tasks import process_chunk
+import asyncio
+from lexibot.core.pipeline import Pipeline
+from lexibot.llm.ports import LanguageModel
 
-class WorkerSettings:
-    """ARQ entrypoint: `arq lexibot.worker.settings.WorkerSettings`."""
+class PipelineRunner:
+    def __init__(self, *, pipeline, llm, anki, engine, alerter, settings) -> None:
+        self._chunk_sem = asyncio.Semaphore(settings.pipeline_concurrency)
+        self._tasks: set[asyncio.Task] = set()
+        self.state = StateStore()           # in-memory edit_state / batch_results / progress
+        self._batches: dict[str, BatchProgress] = {}
 
-    functions: ClassVar[list[Any]] = [process_chunk]
-    on_startup = startup
-    on_shutdown = shutdown
-    max_tries = 5
-    job_timeout = 300
+    def submit_chunk(self, *, user_id: int, items: list[RawItem]) -> tuple[str, BatchProgress]:
+        jid = job_id(user_id, "+".join(i.headword for i in items))
+        existing = self._batches.get(jid)
+        if existing is not None and existing.is_running():
+            return jid, existing          # coalesce rapid duplicate submission
+        ...
+        task = asyncio.create_task(self._run_chunk(jid=jid, ...), name=f"pipeline:{jid}")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return jid, progress
 
-    try:
-        redis_settings = RedisSettings.from_dsn(get_settings().redis_dsn)
-    except Exception:
-        redis_settings = RedisSettings()
+    async def drain(self, *, timeout_s: float = 30.0) -> None: ...   # called on shutdown
 ```
 ## 8. Structured concurrency in the pipeline
 
@@ -415,7 +415,7 @@ async def synthesize_clips(
     return (word.result(), ex1.result(), ex2.result())
 ```
 
-Global limits are enforced with `asyncio.Semaphore`: `min(len(keys), 3)` concurrent chunks for the LLM, and a separate semaphore of 4 around `tts.synthesize`.
+Global limits are enforced with `asyncio.Semaphore`: `min(len(keys), 3)` concurrent chunks for the LLM, and a separate semaphore of 4 around `tts.synthesize`. Chunk-level concurrency is additionally bounded by the runner's `pipeline_concurrency` semaphore (default 3) — this replaces the previous ARQ `max_jobs` knob now that the pipeline runs in-process rather than on a Redis-backed queue. Per-batch progress (the headword→step map) lives in memory on `BatchProgress` rather than in Redis.
 
 ## 9. Persistence (`db`)
 
@@ -439,14 +439,14 @@ class ProcessedItem(SQLModel, table=True):
 
 - **Typed exception hierarchy** in `core/exceptions.py` (`LLMError`, `TTSError`, `AnkiUnavailable`, `InvalidWord`) — handlers `match` on type for user-facing copy.
 - **Retries** via `tenacity` (exponential backoff) around each adapter call; `429` additionally penalizes the offending key.
-- **Idempotency** via deterministic ARQ job ids + the `processed_item` table; the Anki upsert is the final backstop.
-- **Offline queueing** — `AnkiUnavailable` re-queues the item with backoff and tells the user "saved — will add when Anki is back."
+- **Idempotency** via the runner's deterministic job id (`w:<user>:<normalized_headwords>`) coalescing in-flight duplicate submissions + the `processed_item` SQLite table; the Anki upsert is the final backstop.
+- **Offline queueing** — `AnkiUnavailable` records the word as `SKIPPED` (persisted to `processed_item`) and alerts the admin. There is no broker to re-queue against; durable cross-restart retry would require a SQLite-backed pending-queue table (tracked as a follow-up).
 - **Invalid words** — `Sense.is_valid_word == False` ⇒ outcome `SKIPPED`, batch continues.
 
 ## 11. Observability
 
 - **`structlog`** emitting JSON to stdout; request-scoped context (user id, job id) bound in middleware.
-- Docker `json-file` log driver, rotated (10 MB × 5); shipped to **Axiom** (free tier supports 500 GB logs/month and 30 days retention).
+- Docker `json-file` log driver, rotated (10 MB × 5); inspect via `docker compose logs bot`.
 - **Alerts** — `observability/alerts.py` DMs the admin Telegram id when an item exhausts retries.
 
 ## 12. Build, packaging & CI/CD

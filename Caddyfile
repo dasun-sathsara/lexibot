@@ -1,5 +1,7 @@
 # Automatic TLS via Let's Encrypt (architecture §3, plan §4a).
 # Set DOMAIN in .env (Caddy reads it from the environment).
+# Anki sync now goes to AnkiWeb (the headless profile syncs internally), so there is no
+# public /sync/* ingress — only the webhook + healthz live behind Caddy.
 
 {$DOMAIN} {
 	encode gzip
@@ -12,9 +14,6 @@
 		reverse_proxy bot:8080
 	}
 
-	handle /sync/* {
-		reverse_proxy anki-sync-server:8080
-	}
 	handle {
 		respond 404
 	}

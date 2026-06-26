@@ -233,7 +233,7 @@ def test_ssml_07_unknown_gender():
  | UX-02 | render card preview multiple | outputs rich card details for all completed words in the batch                 |
  | UX-03 | completed keyboard single    | inline keyboard contains Edit, Regen, and Delete buttons for one word          |
  | UX-04 | completed keyboard multiple  | inline keyboard contains separate buttons for all words in the batch           |
- | UX-05 | edit reply helper validation | returns parsed dict with word field and state key only if valid reply in Redis |
+ | UX-05 | edit reply helper validation | returns parsed dict with word field and state key only if valid reply in the in-memory StateStore |
 
 ## 11. Shared fixtures (`tests/conftest.py`)
  

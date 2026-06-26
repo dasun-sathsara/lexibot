@@ -1,8 +1,8 @@
 """Chunking, soft-cap, dedup, and deterministic job ids.
 
-The job id coalesces rapid resends of the same word (ARQ uses it as the job key, so a
-second enqueue while the first is pending/running is a no-op). The Anki upsert is the
-final backstop if a duplicate ever runs.
+The job id coalesces rapid resends: the runner uses it as the key into its in-flight
+batch registry, so a second submission while the first is running is a no-op. The
+Anki upsert is the final backstop.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def normalize_word_key(headword: str) -> str:
 
 
 def job_id(user_id: int, headword: str) -> str:
-    """Deterministic ARQ job id: ``w:<user_id>:<normalized_word>``."""
+    """Deterministic job id: ``w:<user_id>:<normalized_word>`` (used as the runner key)."""
     return f"w:{user_id}:{normalize_word_key(headword)}"
 
 

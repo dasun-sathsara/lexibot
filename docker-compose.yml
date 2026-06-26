@@ -1,5 +1,8 @@
 # Single-VPS topology (architecture §3, plan §4/§12).
-# Services: bot, worker, redis, anki-headless, anki-sync-server, caddy.
+# Services: bot, anki-headless, caddy.
+# Redis + the ARQ worker and the self-hosted sync server were removed: the bot now runs
+# the pipeline in-process (architecture §8), and the headless Anki profile syncs to
+# AnkiWeb via the copied, pre-authenticated profile (no in-container login).
 
 x-vocab-image: &vocab-image
   image: ${VOCAB_IMAGE:-ghcr.io/appledore-labs/lexibot:latest}
@@ -13,9 +16,6 @@ services:
   bot:
     <<: *vocab-image
     command: ["python", "-m", "lexibot"]
-    depends_on:
-      redis:
-        condition: service_healthy
     volumes:
       - bot-data:/app/data
     expose:
@@ -29,51 +29,31 @@ services:
     networks:
       - vocabnet
 
-  worker:
-    <<: *vocab-image
-    command: ["arq", "lexibot.worker.settings.WorkerSettings"]
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - bot-data:/app/data
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://anki-headless:8765')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-    networks:
-      - vocabnet
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks:
-      - vocabnet
-
   anki-headless:
-    # Browser desktop + AnkiConnect pre-installed (plan §12).
-    image: ${ANKI_HEADLESS_IMAGE:-mlcivilengineer/anki-desktop-docker:main}
+    # Vendored copy of ThisIsntTheWay/headless-anki (architecture §3, deployment.md).
+    # Runs headless with QT_QPA_PLATFORM=offscreen (no VNC/noVNC desktop stack), keeping
+    # only Anki + AnkiConnect on a virtual surface. The /data volume holds a profile
+    # already authenticated to AnkiWeb out-of-band; AnkiConnect is bound to 0.0.0.0 so
+    # the bot can reach it on the internal network.
+    build:
+      context: ./deploy/anki-headless
+      args:
+        ANKI_VERSION: "25.02.7"
+        ANKICONNECT_VERSION: "25.11.9.0"
+        QT_VERSION: "6"
     restart: unless-stopped
     environment:
-      - SYNC_SERVER=http://anki-sync-server:8080
-      - ANKI_SYNC_SERVER=http://anki-sync-server:8080
-      - ANKI_SYNC_USER=${ANKI_SYNC_USER}
-      - ANKI_SYNC_PASS=${ANKI_SYNC_PASS}
+      - QT_QPA_PLATFORM=offscreen
+      - ANKICONNECT_WILDCARD_ORIGIN=1
+      # No SYNC_SERVER / ANKI_SYNC_* here: the copied profile syncs to AnkiWeb by default.
     volumes:
-      - anki-profile:/config
+      - anki-profile:/data
+      - anki-export:/export
     # AnkiConnect (8765) is reachable only on the internal network, never published.
-    # Port 6080 (VNC) is intentionally not published by default. Expose it temporarily
-    # only for first-time Anki profile setup.
+    # To debug with a real surface, set QT_QPA_PLATFORM=vnc and uncomment the port below;
+    # that exposes a debug VNC surface on 5900 (NOT for normal operation).
+    # ports:
+    #   - "5900:5900"
     expose:
       - "8765"
     healthcheck:
@@ -82,23 +62,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
-    networks:
-      - vocabnet
-
-  anki-sync-server:
-    image: ${ANKI_SYNC_IMAGE:-chrislongros/anki-sync-server-enhanced:latest}
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - anki-sync-data:/data
-    expose:
-      - "8080"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
     networks:
       - vocabnet
 
@@ -118,26 +81,13 @@ services:
     networks:
       - vocabnet
 
-  vector:
-    image: timberio/vector:0.34.0-alpine
-    restart: unless-stopped
-    command: ["--config", "/etc/vector/vector.toml"]
-    environment:
-      - AXIOM_BEARER_TOKEN=Bearer ${AXIOM_TOKEN}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./vector.toml:/etc/vector/vector.toml:ro
-    networks:
-      - vocabnet
-
 networks:
   vocabnet:
     driver: bridge
 
 volumes:
   bot-data:
-  redis-data:
   anki-profile:
-  anki-sync-data:
+  anki-export:
   caddy-data:
   caddy-config:

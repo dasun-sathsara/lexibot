@@ -5,19 +5,19 @@ This guide outlines the step-by-step process for deploying the **lexibot** appli
 ---
 
 ## 1. Prerequisites
-* **VPS Host**: A virtual private server running Ubuntu 24.04 (or similar modern Debian-based Linux). 
-  * **Memory Requirement**: At least **2 GiB of RAM** is highly recommended (e.g. Azure `Standard_B2als_v2` or similar). A 1 GiB instance can be used only if a **2 GiB swap file** is configured to absorb spikes from the Anki QtWebEngine process.
-  * **Swap Configuration**:
+* **VPS Host**: A virtual private server running Ubuntu 24.04 (or similar modern Debian-based Linux).
+  * **Memory Requirement**: A **1 GiB** instance is sufficient. The Anki container runs in `QT_QPA_PLATFORM=offscreen` mode (a vendored copy of `ThisIsntTheWay/headless-anki`), so the heavyweight QtWebEngine/VNC desktop stack that previously required ~2 GiB is gone — only Anki + AnkiConnect run on a virtual surface. A small swap file is still good hygiene for transient spikes.
+  * **Swap Configuration** (optional but recommended):
     ```bash
-    sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+    sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile
     sudo mkswap /swapfile && sudo swapon /swapfile
     echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
     ```
 * **DNS Configuration**: A domain name (e.g. `bot.appledorelabs.dev`) with an **A record** pointing to the public IP of your VPS.
 * **Port Availability**:
-  * **Port 80 (HTTP)** and **Port 443 (HTTPS)** must be open to the public internet for the Caddy web server (handles webhook + public sync requests).
-  * **Port 6080 (VNC over HTTPS)** must be open (at least temporarily) to allow you to configure the headless Anki profile.
+  * **Port 80 (HTTP)** and **Port 443 (HTTPS)** must be open to the public internet for the Caddy web server (handles the Telegram webhook + healthz only).
   * **Port 22 (SSH)** for admin access.
+  * AnkiConnect (8765) is bound to the Docker internal network only and is **never published** to the host. Port 5900 (VNC) is only relevant for debugging (see §4).
 ---
 
 ## 2. Server Provisioning
@@ -52,49 +52,50 @@ Create and fill the `/opt/lexibot/.env` file on the VPS:
    * `VB_GEMINI_API_KEYS`: Your Gemini API Key (from Google AI Studio, comma-separated if multiple).
    * `VB_AZURE_SPEECH_KEY`: Your Azure Speech / AI Services key.
    * `VB_AZURE_SPEECH_ENDPOINT`: The Azure region code (e.g. `eastus2`). *Note: For multi-service Cognitive Services keys, this must be the region name (e.g. `eastus2`) instead of the endpoint URL to prevent 401 WebSocket errors.*
-   * `SYNC_USER1`: The credentials for the self-hosted sync server in the format `email:password` (e.g., `pabasarax@gmail.com:LDt9FHfwsM5ufFj`).
-   * `ANKI_SYNC_USER`: The username portion of `SYNC_USER1` (used to automatically configure the headless client sync).
-   * `ANKI_SYNC_PASS`: The password portion of `SYNC_USER1` (used to automatically configure the headless client sync).
    * `VB_DATABASE_URL`: Set to `sqlite+aiosqlite:///app/data/vocab.db` (enables database persistence in the mounted `bot-data` volume).
    * `VB_WEBHOOK_SECRET`: A secure random hex string for securing the webhook endpoint (e.g. generated via `openssl rand -hex 16`).
 
+   There are **no sync credentials in `.env`**: the headless Anki profile syncs to AnkiWeb using credentials stored inside the copied profile, not via environment variables.
+
 ---
 
-## 4. First-Time Headless Anki Setup
-Because Anki requires one-time sync server authentication and profile bootstrapping, you must complete these manual configuration steps in the headless desktop:
+## 4. Headless Anki Profile Setup (COPY-PROFILE approach)
 
-1. **Start the Stack**:
-   ```bash
-   cd /opt/lexibot
-   sudo docker compose up -d
-   ```
-2. **Access the VNC Web Desktop**:
-   * Visit `https://<your-domain>:6080` (or `https://<vps-ip>:6080`) in your web browser.
-   * **Chrome/HSTS Bypass**: If your domain uses a TLD like `.dev` (which forces HTTPS), Chrome will block connection to self-signed certificates with no "Proceed (unsafe)" button. You can bypass this by visiting the raw VPS IP address directly, or by clicking anywhere on the background of the warning page on the domain and typing **`thisisunsafe`** blindly on your keyboard.
-3. **Log in to Sync Server**:
-   * Click **Sync** inside the headless Anki GUI.
-   * Log in using the `email` and `password` credentials you defined under `SYNC_USER1` in your `.env`.
-4. **Install the AnkiConnect Add-on**:
-   * Go to **Tools** -> **Add-ons**.
-   * Click **Get Add-ons...** and paste the code: **`2055492159`**.
-5. **Create the target Deck**:
-   * Click **Create Deck** at the bottom of the Anki GUI and name it **`Daily`**.
-6. **Apply AnkiConnect Bind Configuration**:
-   * *Note: The deployment setup automatically pre-configures AnkiConnect to listen on `0.0.0.0` inside the volume.*
-   * Overwrite/verify the configuration file on the VPS host if needed:
+The Anki container is built from a vendored copy of `ThisIsntTheWay/headless-anki` under `deploy/anki-headless/` and runs in `QT_QPA_PLATFORM=offscreen` mode. There is **no in-container web GUI login**. Instead, you prepare a profile on a normal desktop Anki install once and copy it into the `anki-headless` `/data` volume.
+
+The image is built via the existing GHCR pipeline (`deploy.yml`) with version-pinned build args (`ANKI_VERSION`, `ANKICONNECT_VERSION`, `QT_VERSION=6`).
+
+1. **Prepare the profile on a desktop Anki install** (one-time, on any machine with Anki):
+   * Open Anki and **sync the profile to AnkiWeb** at least once (log in with your AnkiWeb account). This stores the auth credentials inside the profile.
+   * Install the **AnkiConnect** add-on: *Tools → Add-ons → Get Add-ons...* and paste code **`2055492159`**.
+   * Configure AnkiConnect to listen on all interfaces. Open the AnkiConnect add-on config (*Tools → Add-ons → AnkiConnect → Config*) and set:
      ```json
      {
          "webBindAddress": "0.0.0.0",
          "webCorsOriginList": ["*"]
      }
      ```
-7. **Restart the Headless Server**:
-   * Restart the container to apply the config changes and verify that AnkiConnect is now listening on all interfaces inside the container:
+   * Create the target deck named **`Daily`** (this must match `VB_TARGET_DECK`).
+   * Quit Anki so the profile is flushed to disk.
+
+2. **Copy the prepared profile into the `anki-headless` `/data` volume**:
+   * Start the stack so the named volume is created:
      ```bash
+     cd /opt/lexibot
+     sudo docker compose up -d
+     ```
+   * Copy the prepared Anki profile folder (the `User 1` collection directory plus `prefs.db` / add-on folders) into the container's `/data` volume. The exact path depends on the headless image's Anki data root; copy the whole Anki data folder so the profile, add-ons, and `prefs.db` land under `/data`:
+     ```bash
+     sudo docker cp ./prepared-anki-profile/. lexibot-anki-headless-1:/data/
      sudo docker compose restart anki-headless
+     ```
+   * Verify AnkiConnect is reachable on the internal network:
+     ```bash
      sudo docker exec lexibot-anki-headless-1 ss -tuln | grep 8765
      # Expected output: tcp LISTEN 0 5 0.0.0.0:8765 ...
      ```
+
+3. **Debugging aside (optional)**: if you ever need a real GUI surface (e.g. to fix a stuck profile), set `QT_QPA_PLATFORM=vnc` in the `anki-headless` service environment and uncomment the `# ports: ["5900:5900"]` block in `docker-compose.yml`. That exposes a debug VNC surface on port 5900 — **not** for normal operation. In normal operation the container stays headless with no published ports.
 
 ---
 
@@ -109,33 +110,11 @@ Because Anki requires one-time sync server authentication and profile bootstrapp
 
 ---
 
-## 6. Logs Shipping (Axiom)
-To ship your Docker stdout logs to Axiom (which offers a generous 500 GB/month free tier):
-1. **Create an Axiom Dataset & API Token**:
-   * Log in to [Axiom](https://axiom.co/) and create a dataset named `lexibot`.
-   * Go to settings and generate an API token with ingest permissions.
-2. **Configure Logs Shipping**:
-   * You can configure Docker to send logs via standard syslog, or run a lightweight agent like [Vector](https://vector.dev/) on the VPS to tail the Docker JSON log files and ship them directly to Axiom's OTLP/HTTP endpoint.
+## 6. AnkiWeb Sync & Client Connection
 
----
-
-## 7. Public Sync Server Setup & Client Connection
-Caddy acts as the public entrypoint and automatically handles SSL termination for the Anki Sync Server.
-
-### Caddy Routing Configuration
-The `/sync/*` path is routed internally to the sync server container:
-```caddy
-	handle /sync/* {
-		reverse_proxy anki-sync-server:8080
-	}
-```
+The self-hosted sync server was removed: the headless Anki profile syncs to **AnkiWeb** (Anki's official servers) using the credentials copied into the profile. Personal devices sync to AnkiWeb normally — there is no `/sync/*` Caddy ingress and no `SYNC_USER1` to configure.
 
 ### Connecting Your Personal Device (AnkiMobile / AnkiDroid / Anki Desktop)
-To sync your personal devices with the self-hosted sync server:
-1. **Server URL Configuration**:
-   * Open your Anki client settings (Syncing preferences).
-   * Set the self-hosted sync server URL to: `https://bot.appledorelabs.dev/` (include the trailing slash).
-2. **Credentials**:
-   * Log in using your email and password as defined under `SYNC_USER1` (e.g., `pabasarax@gmail.com` and `LDt9FHfwsM5ufFj`).
-3. **Trigger Sync**:
-   * Click **Sync** on your personal device. It will authenticate with the server and pull all cards added by the Telegram bot.
+1. **Server URL**: leave the sync server at the default AnkiWeb URL (`https://sync.ankiweb.net`). Do **not** point your device at the bot's domain — there is no public sync endpoint.
+2. **Credentials**: log in with your AnkiWeb account (the same one the headless profile is authenticated to).
+3. **Trigger Sync**: click **Sync** on your personal device. AnkiWeb mediates between your device and the headless profile; cards added by the Telegram bot appear after the headless profile's debounced sync runs.

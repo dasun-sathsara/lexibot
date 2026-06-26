@@ -1,14 +1,16 @@
+"""UX callback rendering, completed_keyboard layout, and is_edit_reply state helpers."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiogram.types import InlineKeyboardMarkup, Message, User
-from arq.connections import ArqRedis
 
 from lexibot.bot.handlers.callbacks import is_edit_reply
 from lexibot.bot.keyboards import completed_keyboard
 from lexibot.bot.rendering import render_card_preview
+from lexibot.core.runner import StateStore
 
 
 def test_render_card_preview_single() -> None:
@@ -130,8 +132,8 @@ def test_completed_keyboard_multiple() -> None:
 async def test_is_edit_reply_no_reply() -> None:
     msg = MagicMock(spec=Message)
     msg.reply_to_message = None
-    arq = AsyncMock(spec=ArqRedis)
-    res = await is_edit_reply(msg, arq)
+    state = AsyncMock(spec=StateStore)
+    res = await is_edit_reply(msg, state)
     assert res is False
 
 
@@ -143,11 +145,11 @@ async def test_is_edit_reply_not_in_redis() -> None:
     msg.reply_to_message = replied
     msg.from_user = MagicMock(spec=User)
     msg.from_user.id = 456
-    arq = MagicMock()
-    arq.get = AsyncMock(return_value=None)
-    res = await is_edit_reply(msg, arq)
+    state = MagicMock()
+    state.get = AsyncMock(return_value=None)
+    res = await is_edit_reply(msg, state)
     assert res is False
-    arq.get.assert_called_once_with("edit_state:456:123")
+    state.get.assert_called_once_with("edit_state:456:123")
 
 
 @pytest.mark.asyncio
@@ -158,7 +160,7 @@ async def test_is_edit_reply_success() -> None:
     msg.reply_to_message = replied
     msg.from_user = MagicMock(spec=User)
     msg.from_user.id = 456
-    arq = MagicMock()
-    arq.get = AsyncMock(return_value=b"n:reprimand")
-    res = await is_edit_reply(msg, arq)
+    state = MagicMock()
+    state.get = AsyncMock(return_value=b"n:reprimand")
+    res = await is_edit_reply(msg, state)
     assert res == {"word_field": "n:reprimand", "state_key": "edit_state:456:123"}

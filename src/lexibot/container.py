@@ -1,23 +1,19 @@
-"""Composition root.
-
-Builds the concrete adapters and injects them. Nothing else in the codebase constructs an
-SDK client directly; swapping an adapter is a change here only.
-"""
+"""Composition root: builds adapters and the in-process runner.
+Prefer constructing SDK clients through this module."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import httpx
 from aiogram import Bot
-from arq import create_pool
-from arq.connections import ArqRedis, RedisSettings
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lexibot.anki.connect import AnkiConnect
 from lexibot.anki.upsert import AnkiUpsertGateway
 from lexibot.config import Settings
 from lexibot.core.pipeline import Pipeline, PipelineLimits
+from lexibot.core.runner import PipelineRunner
 from lexibot.db.engine import create_engine
 from lexibot.llm.gemini import GeminiLanguageModel
 from lexibot.llm.keypool import GeminiKeyPool
@@ -26,18 +22,20 @@ from lexibot.tts.mai_voice import MaiVoiceSynthesizer
 
 
 @dataclass(slots=True)
-class WorkerContext:
-    """Adapter graph used by the ARQ worker."""
+class PipelineContext:
+    """Adapter graph used by the in-process pipeline runner."""
 
     http: httpx.AsyncClient
     pipeline: Pipeline
     llm: GeminiLanguageModel
     anki: AnkiUpsertGateway
-    engine: Any  # sqlalchemy AsyncEngine
+    engine: AsyncEngine
     alerter: AdminAlerter
 
 
-def build_pipeline(settings: Settings, http: httpx.AsyncClient) -> WorkerContext:
+def build_pipeline(
+    settings: Settings, http: httpx.AsyncClient, engine: AsyncEngine
+) -> PipelineContext:
     """Construct the full adapter graph from settings."""
     key_pool = GeminiKeyPool(settings.gemini_keys_plain, cooldown_s=settings.gemini_cooldown_s)
     llm = GeminiLanguageModel(
@@ -67,41 +65,40 @@ def build_pipeline(settings: Settings, http: httpx.AsyncClient) -> WorkerContext
         gender=settings.voice_gender,
         limits=PipelineLimits.from_settings(settings),
     )
-    engine = create_engine(settings.database_url)
-    bot = Bot(token=settings.telegram_token.get_secret_value())
-    alerter = AdminAlerter(bot, settings.admin_id)
-    return WorkerContext(
+    alerter = AdminAlerter(Bot(token=settings.telegram_token.get_secret_value()), settings.admin_id)
+    return PipelineContext(
         http=http, pipeline=pipeline, llm=llm, anki=anki, engine=engine, alerter=alerter
     )
 
 
-async def build_worker_context(settings: Settings) -> dict[str, Any]:
-    """Build the ARQ worker context dict."""
-    http = httpx.AsyncClient(timeout=30.0)
-    ctx = build_pipeline(settings, http)
-    return {
-        "pipeline": ctx.pipeline,
-        "llm": ctx.llm,
-        "anki": ctx.anki,
-        "http": http,
-        "engine": ctx.engine,
-        "alerter": ctx.alerter,
-        "settings": settings,
-    }
+def build_runner(
+    settings: Settings,
+    *,
+    http: httpx.AsyncClient | None = None,
+    engine: AsyncEngine | None = None,
+) -> tuple[PipelineRunner, httpx.AsyncClient, AsyncEngine]:
+    """Build the runner plus its owned ``http``/``engine`` for the lifespan to close."""
+    http = http or httpx.AsyncClient(timeout=30.0)
+    engine = engine or create_engine(settings.database_url)
+    ctx = build_pipeline(settings, http, engine)
+    runner = PipelineRunner(
+        pipeline=ctx.pipeline,
+        llm=ctx.llm,
+        anki=ctx.anki,
+        engine=ctx.engine,
+        alerter=ctx.alerter,
+        settings=settings,
+    )
+    return runner, http, engine
 
 
-async def close_worker_context(ctx: dict[str, Any]) -> None:
-    http = ctx.get("http")
-    if isinstance(http, httpx.AsyncClient):
-        await http.aclose()
-    engine = ctx.get("engine")
-    if engine is not None:
-        await engine.dispose()
-    alerter = ctx.get("alerter")
-    if isinstance(alerter, AdminAlerter):
+async def close_runner_resources(
+    *, http: httpx.AsyncClient, engine: AsyncEngine, runner: PipelineRunner
+) -> None:
+    """Drain the runner and close owned resources on shutdown."""
+    await runner.drain()
+    await http.aclose()
+    await engine.dispose()
+    alerter = runner._alerter
+    if alerter is not None:
         await alerter._bot.session.close()
-
-
-async def create_redis_pool(settings: Settings) -> ArqRedis:
-    """Create the ARQ Redis pool used by the bot to enqueue jobs."""
-    return await create_pool(RedisSettings.from_dsn(settings.redis_dsn))

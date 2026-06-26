@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from aiogram import Dispatcher
-from arq.connections import ArqRedis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from lexibot.bot.handlers import callbacks, commands, words
 from lexibot.bot.middlewares.auth import WhitelistMiddleware
 from lexibot.bot.middlewares.context import LoggingContextMiddleware
+from lexibot.core.runner import PipelineRunner
 
 
 def build_dispatcher(
-    *, allowed_ids: list[int], arq: ArqRedis, engine: AsyncEngine | None = None
+    *, allowed_ids: list[int], runner: PipelineRunner, engine: AsyncEngine | None = None
 ) -> Dispatcher:
     dp = Dispatcher()
 
@@ -23,8 +23,10 @@ def build_dispatcher(
         observer.outer_middleware(logging_mw)
         observer.outer_middleware(auth_mw)
 
-    # Inject the ARQ pool and DB engine into every handler via workflow data.
-    dp["arq"] = arq
+    # Inject the in-process runner (and the shared StateStore it owns) plus the DB
+    # engine into every handler via workflow data.
+    dp["runner"] = runner
+    dp["state"] = runner.state
     if engine is not None:
         dp["engine"] = engine
 

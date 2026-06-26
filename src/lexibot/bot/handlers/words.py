@@ -1,20 +1,12 @@
-"""Free-text word ingestion.
-
-Parses the message, applies the soft cap and dedup, chunks the items, and enqueues one
-``process_chunk`` job per chunk with a deterministic id so rapid resends coalesce. A single
-status message is posted and later edited in place with the batch summary.
-"""
+"""Free-text word ingestion: parse → dedup → chunk → dispatch to the runner."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 
 import structlog
 from aiogram import Bot, Router
 from aiogram.types import Message
-from arq.connections import ArqRedis
-from arq.jobs import Job
 
 from lexibot.bot.keyboards import completed_keyboard
 from lexibot.bot.rendering import render_card_preview, render_summary, safe_markdown
@@ -22,11 +14,11 @@ from lexibot.bot.task_registry import spawn_task
 from lexibot.config import get_settings
 from lexibot.core.enums import ItemOutcome
 from lexibot.core.parsing import parse_message
+from lexibot.core.runner import BatchProgress, PipelineRunner, StateStore
 from lexibot.worker.enqueue import (
     apply_soft_cap,
     chunk_items,
     dedupe_items,
-    job_id,
 )
 
 log = structlog.get_logger(__name__)
@@ -34,68 +26,51 @@ log = structlog.get_logger(__name__)
 router = Router(name="words")
 
 
-async def _monitor_jobs(
+def _format_state(state: str) -> str:
+    """Render one headword's pipeline step for the live stepper."""
+    STATE_TEXT = {
+        "queue": "\U0001f4a4 In queue...",
+        "llm": "\U0001f9e0 LLM: Generating meaning & examples...",
+        "tts": "\U0001f50a TTS: Synthesizing voice audio...",
+        "anki": "\U0001f4e5 Anki: Saving card & media...",
+        "done": "\u2705 Added successfully!",
+        "rewritten": "\u267b\ufe0f Rewritten!",
+    }
+    if state.startswith("failed"):
+        if ":" in state:
+            err = state.split(":", 1)[1].strip()
+            return f"\u274c Failed: {err}"
+        return "\u274c Failed"
+    return STATE_TEXT.get(state, "\U0001f4a4 In queue...")
+
+
+async def _monitor_progress(
     status: Message,
-    jobs: list[Job],
+    handles: list[tuple[str, BatchProgress]],
     word_keys: list[str],
-    arq: ArqRedis,
+    state: StateStore,
     bot: Bot,
 ) -> None:
-    import json
-
-    from arq.jobs import JobStatus
-
+    """Poll in-memory BatchProgress handles and edit the status message in place."""
     last_text = ""
     while True:
-        all_finished = True
-        for job in jobs:
-            try:
-                js = await job.status()
-                if js in (JobStatus.queued, JobStatus.in_progress):
-                    all_finished = False
-                    break
-            except Exception:
-                pass
+        all_done = all(h.done.is_set() for _, h in handles)
 
+        # The runner mirrors in-memory progress to the StateStore under the legacy key
+        # for any consumer that still reads it; here we read it directly off the handles.
         progress_map: dict[str, str] = {}
-        for job in jobs:
-            try:
-                val = await arq.get(f"lexibot:progress:{job.job_id}")
-                if val:
-                    data = json.loads(val.decode() if isinstance(val, bytes) else val)
-                    progress_map.update(data)
-            except Exception:
-                pass
+        for _, handle in handles:
+            progress_map.update(handle.states)
 
-        states = {}
-        for word in word_keys:
-            target = word.strip().casefold()
-            states[word] = progress_map.get(target, "queue")
-
-        def format_state(state: str) -> str:
-            STATE_TEXT = {
-                "queue": "💤 In queue...",
-                "llm": "🧠 LLM: Generating meaning & examples...",
-                "tts": "🔊 TTS: Synthesizing voice audio...",
-                "anki": "📥 Anki: Saving card & media...",
-                "done": "✅ Added successfully!",
-                "rewritten": "♻️ Rewritten!",
-            }
-            if state.startswith("failed"):
-                if ":" in state:
-                    err = state.split(":", 1)[1].strip()
-                    return f"❌ Failed: {err}"
-                return "❌ Failed"
-            return STATE_TEXT.get(state, "💤 In queue...")
+        states = {word: progress_map.get(word.strip().casefold(), "queue") for word in word_keys}
 
         words_count = len(word_keys)
         plural = "s" if words_count > 1 else ""
-        header = f"⏳ **Processing {words_count} word{plural}...**"
+        header = f"\u23f3 **Processing {words_count} word{plural}...**"
         msg_parts = [header, ""]
         for word in word_keys:
-            state = states[word]
-            formatted = format_state(state)
-            msg_parts.append(f"* `{word}` — {formatted}")
+            formatted = _format_state(states[word])
+            msg_parts.append(f"* `{word}` \u2014 {formatted}")
 
         text = "\n".join(msg_parts)
         summary_text = safe_markdown(text)
@@ -112,20 +87,17 @@ async def _monitor_jobs(
             except Exception as e:
                 log.error("job.monitor.edit_message.failed", error=str(e))
 
-        if all_finished:
+        if all_done:
             break
 
         await asyncio.sleep(1.5)
 
+    # Collect per-word results from each completed handle.
     results = []
-    for job in jobs:
-        try:
-            job_res = await job.result()
-            if job_res:
-                results.extend(job_res)
-        except Exception as e:
-            log.error("job.result.failed", error=str(e))
+    for _, handle in handles:
+        results.extend(handle.results)
 
+    # Backfill any word that finished without a recorded result (defensive).
     for word in word_keys:
         matched = False
         for r in results:
@@ -144,8 +116,12 @@ async def _monitor_jobs(
                 }
             )
 
+    # Persist the batch results so callback handlers (Regen / Edit Meaning) can update the
+    # original preview message in place. Mirrors the previous ``batch_results:<mid>`` key.
     try:
-        await arq.set(f"batch_results:{status.message_id}", json.dumps(results), ex=86400)
+        import json
+
+        await state.set(f"batch_results:{status.message_id}", json.dumps(results), ex=86400)
     except Exception as e:
         log.error("batch_results.save.failed", error=str(e))
 
@@ -183,7 +159,9 @@ async def _monitor_jobs(
 
 
 @router.message()
-async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
+async def ingest_words(
+    message: Message, runner: PipelineRunner, state: StateStore, bot: Bot
+) -> None:
     user = message.from_user
     if user is None:
         return
@@ -202,25 +180,12 @@ async def ingest_words(message: Message, arq: ArqRedis, bot: Bot) -> None:
 
     status = await message.answer(f"\u23f3 Queued {len(kept)} word(s)\u2026{note}")
 
-    jobs: list[Job] = []
+    handles: list[tuple[str, BatchProgress]] = []
     word_keys: list[str] = []
     for chunk in chunk_items(kept, size=settings.chunk_size):
-        jid = job_id(user.id, "+".join(i.headword for i in chunk))
-
-        initial_progress = {item.headword.strip().casefold(): "queue" for item in chunk}
-        await arq.set(f"lexibot:progress:{jid}", json.dumps(initial_progress), ex=3600)
-
-        job = await arq.enqueue_job(
-            "process_chunk",
-            [item.model_dump() for item in chunk],
-            user.id,
-            _job_id=jid,
-        )
-        if job is None:
-            job = Job(jid, arq)
-        jobs.append(job)
-
+        jid, progress = runner.submit_chunk(user_id=user.id, items=chunk)
+        handles.append((jid, progress))
         for item in chunk:
             word_keys.append(item.headword)
 
-    spawn_task(_monitor_jobs(status, jobs, word_keys, arq, bot))
+    spawn_task(_monitor_progress(status, handles, word_keys, state, bot))
