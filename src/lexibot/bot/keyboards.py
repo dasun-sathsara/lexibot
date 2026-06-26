@@ -1,4 +1,4 @@
-"""Inline keyboards for the single-word preview."""
+"""Inline keyboards for word preview and completed-word actions."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ def completed_keyboard(results: list[dict[str, str]]) -> InlineKeyboardMarkup | 
     """Inline keyboard for completed words.
 
     Includes Edit Meaning, Regen Examples, and Delete Card buttons.
+    Returns ``None`` when no words were added or rewritten.
     """
     completed = [
         r for r in results if r.get("outcome") in (ItemOutcome.ADDED, ItemOutcome.REWRITTEN)

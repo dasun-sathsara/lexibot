@@ -1,8 +1,8 @@
 """Media storage for a card's audio clips.
 
 Filenames are produced by :func:`lexibot.core.models.media_filename` (the ``tgb_`` namespace
-with a text+voice hash). On both the add and rewrite paths we store the same three
-filenames, so a rewrite deterministically *replaces* that word's media (UPSERT-05).
+with a text+voice hash). On both the add and rewrite paths we store the same filenames
+(0--3 clips per card), so a rewrite deterministically *replaces* that word's media (UPSERT-05).
 """
 
 from __future__ import annotations

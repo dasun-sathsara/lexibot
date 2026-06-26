@@ -2,7 +2,7 @@
 
 Hardened against the architecture sketch: all dynamic text is XML-escaped so words/sentences
 containing ``& < > " '`` produce well-formed SSML rather than a 400 from Azure (SSML-05/06).
-The word is synthesized ~15% slower for clarity; sentences run at normal rate.
+When called with ``slow=True``, the entire utterance is synthesized ~15%% slower.
 """
 
 from __future__ import annotations

@@ -53,7 +53,10 @@ class GeminiLanguageModel:
         self._model = model
 
     async def enrich(self, items: list[RawItem], *, sense_hint: str | None = None) -> list[Sense]:
-        """Enrich a chunk of items into :class:`Sense` objects (order preserved)."""
+        """Enrich a chunk of items into :class:`Sense` objects (order preserved).
+
+        ``sense_hint`` is accepted for Protocol compatibility but is unused by this implementation.
+        """
         if not items:
             return []
         prompt = build_user_prompt(items)

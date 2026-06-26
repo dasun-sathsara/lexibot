@@ -11,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 def create_engine(database_url: str) -> AsyncEngine:
+    """Create a SQLAlchemy async engine for the given database URL."""
     return create_async_engine(database_url, echo=False, future=True)
 
 
@@ -22,6 +23,7 @@ async def create_all(engine: AsyncEngine) -> None:
 
 @asynccontextmanager
 async def session_scope(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """Async context manager that yields an ``AsyncSession``, commits on success, rolls back on error, and always closes."""  # noqa: E501
     session = AsyncSession(engine, expire_on_commit=False)
     try:
         yield session

@@ -20,7 +20,7 @@ _BASE_ENV = {
 
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    """Strip any ambient ``VB_*`` vars so tests are hermetic, and ignore .env."""
+    """Strip any ambient ``VB_*`` vars so tests are hermetic (tests also pass ``_env_file=None`` to ``Settings`` to ignore .env)."""  # noqa: E501
     import os
 
     for key in list(os.environ):

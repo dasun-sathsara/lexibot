@@ -71,7 +71,7 @@ def render_card_preview(results: list[dict[str, str]]) -> str:
 
 
 def safe_markdown(text: str) -> str:
-    """Escape arbitrary text for Telegram MarkdownV2."""
+    """Convert text to Telegram MarkdownV2 format safely."""
     return str(telegramify_markdown.markdownify(text))
 
 

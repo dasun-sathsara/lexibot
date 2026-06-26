@@ -25,7 +25,7 @@ class AnkiError(LexibotError):
 class AnkiUnavailable(AnkiError):
     """AnkiConnect could not be reached (connection refused / Anki down).
 
-    Triggers offline queueing: the item is re-queued and the user is told it is saved.
+    The word is skipped and an admin alert is sent; no automatic re-queue.
     """
 
 

@@ -66,6 +66,11 @@ def media_filename(headword: str, text: str, *, gender: str, suffix: str = "") -
     The hash covers the spoken ``text`` plus the ``gender`` (voice), so the same word in a
     different voice produces a different filename (UPSERT-07 cache-busting), while the same
     text+voice is stable (UPSERT-06).
+
+    :param headword: Used to build the human-readable slug in the filename.
+    :param text: The spoken text whose bytes are hashed.
+    :param gender: Voice identity, mixed into the hash for cache-busting.
+    :param suffix: Optional extra label (e.g. "ex1") inserted before ``.mp3``.
     """
     digest = hashlib.sha256(f"{text}\x00{gender}".encode()).hexdigest()[:_HASH_LEN]
     slug = "".join(c if c.isalnum() else "_" for c in headword.strip().lower())
@@ -89,7 +94,7 @@ class MediaClip(BaseModel):
 
 
 class Card(BaseModel):
-    """A fully-assembled Anki note: typed fields plus its three media clips."""
+    """A fully-assembled Anki note: typed fields plus up to three media clips."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -113,6 +118,8 @@ class Card(BaseModel):
         ``audio`` is ``(word, sentence_1, sentence_2)``. ``None`` for a clip means that
         clip failed; the others are still stored so partial TTS progress is preserved.
         When ``audio`` itself is ``None`` no media is attached.
+
+        :param gender: Voice identity forwarded to ``media_filename``.
         """
         clips: list[MediaClip] = []
         if audio is not None:

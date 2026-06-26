@@ -1,10 +1,11 @@
 """Per-word orchestration: LLM -> TTS -> Anki.
 
-The three audio clips are generated with :class:`asyncio.TaskGroup` so a failure cancels its
-siblings and raises an :class:`ExceptionGroup`. The pipeline maps that to graceful partial
-failure: the card is still written (text only) and audio is flagged for later retry
-(PIPE-02/03). Concurrency is bounded by two semaphores — ``min(#keys, 3)`` for LLM chunks and
-4 for TTS calls.
+The three audio clips are generated with :class:`asyncio.TaskGroup` for structured
+concurrency. Individual TTS failures are caught inside each task and returned as
+``None``, so a single clip failure does not cancel its siblings. The card is still
+written with whatever audio succeeded (text-only when all three fail). TTS concurrency
+is bounded by a semaphore (default 4); LLM chunk concurrency is bounded by
+``settings.pipeline_concurrency``.
 """
 
 from __future__ import annotations

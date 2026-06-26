@@ -1,7 +1,7 @@
 """structlog configuration with secret scrubbing.
 
-A processor walks the event dict and renders any :class:`~pydantic.SecretStr` (or known
-secret-ish values) as a fixed mask so credentials never reach the logs (SEC-01/02).
+A processor walks the event dict and renders any :class:`~pydantic.SecretStr` value as a
+fixed mask so credentials never reach the logs (SEC-01/02).
 """
 
 from __future__ import annotations

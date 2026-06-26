@@ -50,16 +50,19 @@ async def add_audit_event(
 
 
 class ProcessedItemRepository:
+    """Manages processed-item idempotency records."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def get(self, job_id: str) -> ProcessedItem | None:
+        """Look up a processed item by its job id."""
         return await self._session.get(ProcessedItem, job_id)
 
     async def record(
         self, *, job_id: str, user_id: int, word_field: str, outcome: str
     ) -> ProcessedItem:
-        """Insert or update the processed-item record (last-outcome wins)."""
+        """Insert or update the processed-item record — last outcome and word_field values win."""
         existing = await self._session.get(ProcessedItem, job_id)
         if existing is not None:
             existing.outcome = outcome
@@ -72,15 +75,19 @@ class ProcessedItemRepository:
 
 
 class UserSettingsRepository:
+    """Per-user model/voice preferences repository."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def get(self, user_id: int) -> UserSettings | None:
+        """Look up user settings by user id."""
         return await self._session.get(UserSettings, user_id)
 
     async def upsert(
         self, user_id: int, *, gemini_model: str | None = None, voice_gender: str | None = None
     ) -> UserSettings:
+        """Create or update user settings; only sets non-``None`` fields."""
         row = await self._session.get(UserSettings, user_id)
         if row is None:
             row = UserSettings(user_id=user_id)
@@ -93,13 +100,17 @@ class UserSettingsRepository:
 
 
 class AuditRepository:
+    """Append-only audit trail repository."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def add(self, *, user_id: int, event: str, detail: str = "") -> None:
+        """Append an audit log entry."""
         self._session.add(AuditLog(user_id=user_id, event=event, detail=detail))
 
     async def recent(self, limit: int = 50) -> list[AuditLog]:
+        """Return the most recent audit log entries, newest first."""
         result = await self._session.execute(
             select(AuditLog).order_by(col(AuditLog.created_at).desc()).limit(limit)
         )

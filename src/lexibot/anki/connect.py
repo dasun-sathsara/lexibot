@@ -1,7 +1,8 @@
 """AnkiConnect client over httpx.
 
 AnkiConnect exposes a single JSON-RPC endpoint; every action is a POST of
-``{"action", "version", "params"}`` and the reply is ``{"result", "error"}``.
+``{"action": ..., "version": ..., "params": ...}`` and the reply is
+``{"result": ..., "error": ...}``.
 
 The :func:`build_find_query` and :func:`escape_query_term` helpers are pure functions so
 the search-string hardening (UPSERT-04) is unit-testable without any HTTP mock.
@@ -41,10 +42,10 @@ def escape_query_term(term: str) -> str:
 
 
 def build_find_query(note_type: str, word_field: str) -> str:
-    r"""Build the collection-wide ``findNotes`` query for an exact ``Word`` match.
+    r"""Build the collection-wide ``findNotes`` query for an exact match on ``Word`` field.
 
     Intentionally has **no** ``deck:`` constraint so the match is collection-wide
-    (UPSERT-08). Both the note-type and the word value are quote-escaped (UPSERT-04).
+    (UPSERT-08). Both the note-type and the word-field value are quote-escaped (UPSERT-04).
     """
     nt = escape_query_term(note_type)
     wf = escape_query_term(word_field)
@@ -52,7 +53,7 @@ def build_find_query(note_type: str, word_field: str) -> str:
 
 
 class AnkiConnectError(AnkiError):
-    """AnkiConnect returned a non-null ``error`` field."""
+    """AnkiConnect returned a non-null ``error`` field or an HTTP-level error was received."""
 
 
 class AnkiConnect:
